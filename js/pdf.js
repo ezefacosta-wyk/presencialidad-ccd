@@ -222,7 +222,17 @@ export async function generarPDF(anio, mes) {
 
 export async function exportarPDF(anio, mes) {
   const doc = await generarPDF(anio, mes);
-  doc.save(`Planilla de Turnos - ${P.MESES[mes - 1].toUpperCase()} ${anio}.pdf`);
+  const nombre = `Planilla de Turnos - ${P.MESES[mes - 1].toUpperCase()} ${anio}.pdf`;
+  // Dentro de un artifact de Claude las descargas pasan por su capacidad
+  // "downloads"; en GitHub Pages o local se descarga directo.
+  const claude = window.claude;
+  const dl = claude && typeof claude.use === 'function' ? await claude.use('downloads').catch(() => null) : null;
+  if (dl) {
+    try { await dl.save({ filename: nombre, data: doc.output('blob') }); }
+    catch (e) { if (e && e.code === 'declined') return; throw new Error((e && e.message) || 'La descarga no está disponible.'); }
+    return;
+  }
+  doc.save(nombre);
 }
 
 // ---------------------------------------------------------------
