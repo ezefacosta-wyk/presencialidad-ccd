@@ -11,7 +11,8 @@ línea visual, con mucho más alcance.
 Mientras `js/config.js` no tenga un `firebaseConfig`, la web corre en
 **modo demo**: usa áreas, personas y turnos de ejemplo, guarda los cambios
 solo en el navegador y muestra un selector **Ver como** para probar qué ve
-y qué puede hacer cada rango.
+y qué puede hacer cada rango. En Administración hay un botón para vaciar
+los datos de ejemplo y empezar a armar las áreas y los rangos propios.
 
 Para verla: abrila con un servidor estático (`python3 -m http.server`) o
 publicala en GitHub Pages (Settings → Pages → rama `main`, carpeta `/root`).
@@ -76,7 +77,8 @@ probó contra un proyecto real.
 
 ## Pendiente
 
-- Cargar las áreas, el personal y los tipos de turno reales.
+- Cargar las áreas y el personal reales (los tipos de turno ya son los de la planilla del NOC).
+- Cómputo de horas reales, pasivas y totales por persona, como en la planilla.
 - Módulo de presencialidad y costos mensuales (Racionamiento y Movilidad)
   heredado del proyecto anterior.
 - Probar el backend Firebase y las reglas con un proyecto real.

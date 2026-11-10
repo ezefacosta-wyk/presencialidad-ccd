@@ -122,12 +122,12 @@ button.dia:hover{background:var(--acento-soft);}
 .tabla-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:var(--radius);background:var(--paper-raised);margin-top:14px;}
 table.plan{border-collapse:collapse;font-size:12px;}
 .plan th,.plan td{border-bottom:1px solid var(--rule);border-right:1px solid var(--rule);padding:0;text-align:center;}
-.plan thead th{padding:5px 0;min-width:34px;font-family:'IBM Plex Mono',monospace;font-weight:500;color:var(--ink-soft);}
+.plan thead th{padding:5px 0;min-width:36px;font-family:'IBM Plex Mono',monospace;font-weight:500;color:var(--ink-soft);}
 .plan thead th span{display:block;font-size:9.5px;opacity:.7;}
 .plan .col-nombre{position:sticky;left:0;z-index:1;background:var(--paper-raised);text-align:left;padding:7px 12px;white-space:nowrap;font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:500;color:var(--ink);min-width:200px;}
 .plan .finde{background:var(--weekend-bg);}
 .plan .feriado{background:var(--danger-soft);}
-.celda{width:34px;height:32px;border:none;background:transparent;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:#fff;display:block;}
+.celda{width:36px;height:32px;border:none;background:transparent;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:#fff;display:block;}
 .celda.llena{background:var(--c);}
 .celda:not(:disabled):hover{box-shadow:inset 0 0 0 2px var(--ink);}
 .celda:disabled{cursor:default;}
@@ -148,7 +148,8 @@ input[type=color]{padding:2px;width:42px;height:36px;}
 .btn:hover{filter:brightness(1.08);}
 .btn.chico{padding:6px 12px;font-size:13px;}
 .btn.secundario{background:transparent;color:var(--ink);border-color:var(--rule-strong);}
-.btn.peligro{background:transparent;color:var(--danger);border-color:var(--danger);margin-right:auto;}
+.btn.peligro{background:transparent;color:var(--danger);border-color:var(--danger);}
+.modal-acciones .btn.peligro{margin-right:auto;}
 .btn-link{background:none;border:none;color:var(--acento);font-weight:500;padding:4px 6px;text-decoration:underline;text-underline-offset:3px;}
 .btn-link.peligro{color:var(--danger);}
 .btn-link.claro{color:rgba(238,239,233,.8);padding:0;font-size:12px;}
@@ -157,6 +158,7 @@ dialog{border:1px solid var(--rule-strong);border-radius:var(--radius);padding:0
 dialog::backdrop{background:rgba(27,42,46,.55);}
 .modal-form{padding:22px;display:flex;flex-direction:column;gap:12px;}
 .modal-form h3{font-size:19px;margin-bottom:4px;}
+.modal-form p{margin:0;font-size:14px;line-height:1.5;color:var(--ink-soft);}
 .modal-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-soft);}
 .modal-acciones{display:flex;justify-content:flex-end;gap:8px;margin-top:8px;}
 .form-error{margin:0;font-size:13px;color:var(--danger);}

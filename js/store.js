@@ -29,20 +29,30 @@ export const borrar = (col, id) => backend.borrar(col, id);
 export const setTurno = (persona, dia, code) => backend.setTurno(persona, dia, code);
 export const login = () => backend.login();
 export const logout = () => backend.logout();
+export const vaciarDemo = () => backend.vaciar && backend.vaciar();
 export const verComo = (personaId) => backend.verComo && backend.verComo(personaId);
 
 // ---------------------------------------------------------------
 // Datos de ejemplo (solo modo demo)
 // ---------------------------------------------------------------
+// Tipos de turno tomados de la planilla de turnos del NOC (CCD).
+// grupo: 'activo' = de turno, 'pasivo' = guardia pasiva, 'ausente' = no presta servicio.
 export const TIPOS_DEFAULT = [
-  { id: 'TM', label: 'Turno mañana', horario: '07 a 15 h', grupo: 'activo', color: '#1F6F63', orden: 1 },
-  { id: 'TT', label: 'Turno tarde', horario: '15 a 23 h', grupo: 'activo', color: '#2E5C8A', orden: 2 },
-  { id: 'TN', label: 'Turno noche', horario: '23 a 07 h', grupo: 'activo', color: '#4A3F7A', orden: 3 },
-  { id: 'TP', label: 'Turno pasivo', horario: 'Guardia pasiva', grupo: 'pasivo', color: '#B8862E', orden: 4 },
-  { id: 'FR', label: 'Franco', horario: '', grupo: 'ausente', color: '#6B7280', orden: 5 },
-  { id: 'V', label: 'Vacaciones', horario: '', grupo: 'ausente', color: '#C06A2B', orden: 6 },
-  { id: 'L', label: 'Licencia', horario: '', grupo: 'ausente', color: '#7A5C99', orden: 7 }
-];
+  { id: 'A', label: 'Turno Alpha', horario: '12 hs · 08 a 20 h', grupo: 'activo', color: '#1F6F63' },
+  { id: 'B', label: 'Turno Bravo', horario: '6 hs', grupo: 'activo', color: '#2E5C8A' },
+  { id: 'C', label: 'Turno Charlie', horario: '12 hs · 20 a 08 h', grupo: 'activo', color: '#4A3F7A' },
+  { id: 'PAS', label: 'Pasivo Alpha', horario: 'Semana', grupo: 'pasivo', color: '#B8862E' },
+  { id: 'PAF', label: 'Pasivo Alpha', horario: 'Fin de semana', grupo: 'pasivo', color: '#8F6410' },
+  { id: 'PCS', label: 'Pasivo Charlie', horario: 'Semana', grupo: 'pasivo', color: '#C06A2B' },
+  { id: 'PCF', label: 'Pasivo Charlie', horario: 'Fin de semana', grupo: 'pasivo', color: '#9A4A17' },
+  { id: 'I', label: 'Instrucción', horario: '', grupo: 'activo', color: '#0E7C86' },
+  { id: 'F', label: 'Franco', horario: '', grupo: 'ausente', color: '#6B7280' },
+  { id: 'V', label: 'Vacaciones', horario: '', grupo: 'ausente', color: '#70803A' },
+  { id: 'LR', label: 'ART', horario: '', grupo: 'ausente', color: '#B3462C' },
+  { id: 'LF', label: 'Enfermedad familiar', horario: '', grupo: 'ausente', color: '#A8577E' },
+  { id: 'LE', label: 'Examen', horario: '', grupo: 'ausente', color: '#7A5C99' },
+  { id: 'LN', label: 'Paternidad / Maternidad', horario: '', grupo: 'ausente', color: '#5C7A99' }
+].map((t, i) => ({ ...t, orden: i + 1 }));
 
 function semilla(anio, mes) {
   const areas = [
@@ -79,10 +89,11 @@ function semilla(anio, mes) {
         const dow = new Date(anio, mes - 1, dia).getDay();
         const semana = Math.floor((dia - 1) / 7);
         const finde = dow === 0 || dow === 6;
-        if (semana % gente.length === i) d[dia] = 'TP';
-        else if (finde) continue;
+        const pasivo = semana % gente.length === i;
+        if (finde) { if (pasivo) d[dia] = 'PAF'; continue; }
+        if (pasivo) d[dia] = 'PAS';
         else if ((semana + 2) % gente.length === i && semana === 1) d[dia] = 'V';
-        else d[dia] = (i + semana) % 3 === 1 ? 'TT' : 'TM';
+        else d[dia] = 'B';
       }
       turnos[turnoId(anio, mes, p.id)] = { anio, mes, personaId: p.id, areaId: a.id, dias: d };
     });
@@ -94,7 +105,7 @@ function semilla(anio, mes) {
 // Backend demo (localStorage)
 // ---------------------------------------------------------------
 function demoBackend() {
-  const KEY = 'ccd-demo-v1';
+  const KEY = 'ccd-demo-v2';
   let db;
   try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { db = null; }
   if (!db) db = semilla(periodo.anio, periodo.mes);
@@ -130,6 +141,13 @@ function demoBackend() {
       const id = turnoId(periodo.anio, periodo.mes, persona.id);
       const t = db.turnos[id] || (db.turnos[id] = { ...periodo, personaId: persona.id, areaId: persona.areaId, dias: {} });
       if (code) t.dias[dia] = code; else delete t.dias[dia];
+      persistir(); refrescar();
+    },
+    vaciar() {
+      db = {
+        areas: [], feriados: [], turnos: {}, tipos: TIPOS_DEFAULT.map(t => ({ ...t })),
+        personas: [{ id: 'jefe', nombre: 'Jefe de departamento', rol: 'jefe', areaId: null, email: '' }]
+      };
       persistir(); refrescar();
     },
     verComo(personaId) { try { localStorage.setItem('ccd-demo-user', personaId); } catch (e) { /* sin storage */ } refrescar(); },

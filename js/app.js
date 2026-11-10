@@ -273,6 +273,10 @@ function vistaAdmin() {
   return `<section class="bloque">
     <div class="bloque-head"><h2>Administración</h2></div>
     <div class="tarjetas una">
+      ${MODO_DEMO ? `<article class="tarjeta">
+        <header><h3>Datos de ejemplo</h3><button class="btn chico peligro" data-accion="vaciar">Vaciar datos de ejemplo</button></header>
+        <p class="vacio">Quita las áreas, las personas y los turnos de ejemplo para que armes tus propios grupos y rangos. Los tipos de turno se conservan.</p>
+      </article>` : ''}
       <article class="tarjeta">
         <header><h3>Áreas</h3></header>
         <form class="fila-form" data-form="area"><input name="nombre" placeholder="Nombre del área" required><button class="btn chico">Agregar área</button></form>
@@ -433,6 +437,12 @@ document.addEventListener('click', (e) => {
     case 'persona-nueva': modalPersona(null, d.area || null); break;
     case 'persona-editar': modalPersona(data.personas.find(x => x.id === d.id)); break;
     case 'borrar': if (esJefe()) store.borrar(d.col, d.id); break;
+    case 'vaciar':
+      if (esJefe()) abrirModal(`<h3>Vaciar datos de ejemplo</h3>
+        <p>Se van a quitar todas las áreas, personas, turnos y feriados cargados en este navegador. Quedan los tipos de turno y un único usuario jefe de departamento. No se puede deshacer.</p>
+        <div class="modal-acciones"><button type="button" class="btn secundario" data-accion="cerrar-modal">Cancelar</button><button class="btn">Vaciar</button></div>`,
+        () => { ui.area = null; store.vaciarDemo(); });
+      break;
     case 'login': store.login(); break;
     case 'logout': store.logout(); break;
   }
