@@ -1,0 +1,55 @@
+rules_version = '2';
+
+// Reglas para el modo Firebase. La jerarquía se lee de /usuarios/{email}:
+// cada documento tiene { rol, areaId, personaId, nombre } y la app lo
+// mantiene sincronizado cuando se edita una persona.
+//
+//   jefe                    -> escribe todo
+//   coordinador / adjunto   -> turnos y personal de SU área (solo rangos menores)
+//   tecnico                 -> solo lectura
+//
+// Para arrancar: creá a mano en la consola el documento
+//   /usuarios/<tu-email-en-minúsculas>  con  { rol: "jefe", nombre: "..." }
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function email() { return request.auth.token.email; }
+    function logueado() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/usuarios/$(email()));
+    }
+    function yo() { return get(/databases/$(database)/documents/usuarios/$(email())).data; }
+    function esJefe() { return logueado() && yo().rol == 'jefe'; }
+    function coordina(areaId) {
+      return logueado() && yo().rol in ['coordinador', 'adjunto'] && yo().areaId == areaId;
+    }
+    // Rangos que puede asignar un coordinador / adjunto dentro de su área
+    function rolMenor(rol) {
+      return rol == 'tecnico' || (rol == 'adjunto' && yo().rol == 'coordinador');
+    }
+    function gestionaPersona(d) { return coordina(d.areaId) && rolMenor(d.rol); }
+
+    match /usuarios/{userEmail} {
+      allow read: if request.auth != null && (email() == userEmail || logueado());
+      allow create: if esJefe() || gestionaPersona(request.resource.data);
+      allow update: if esJefe() || (gestionaPersona(resource.data) && gestionaPersona(request.resource.data));
+      allow delete: if esJefe() || gestionaPersona(resource.data);
+    }
+    match /personas/{personaId} {
+      allow read: if logueado();
+      allow create: if esJefe() || gestionaPersona(request.resource.data);
+      allow update: if esJefe() || (gestionaPersona(resource.data) && gestionaPersona(request.resource.data));
+      allow delete: if esJefe() || gestionaPersona(resource.data);
+    }
+    match /turnos/{turnoId} {
+      allow read: if logueado();
+      allow create: if esJefe() || coordina(request.resource.data.areaId);
+      allow update: if esJefe() || (coordina(resource.data.areaId) && coordina(request.resource.data.areaId));
+      allow delete: if esJefe() || coordina(resource.data.areaId);
+    }
+    match /areas/{id}      { allow read: if logueado(); allow write: if esJefe(); }
+    match /tiposTurno/{id} { allow read: if logueado(); allow write: if esJefe(); }
+    match /feriados/{id}   { allow read: if logueado(); allow write: if esJefe(); }
+  }
+}

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Turnos y Presencialidad · CCD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">CCD</span>
+      <div class="brand-text">
+        <h1 id="titulo">Turnos y Presencialidad</h1>
+        <p id="statusLine" class="status-line">Conectando&hellip;</p>
+      </div>
+    </div>
+    <div class="topbar-controls">
+      <div class="period-nav" role="group" aria-label="Mes">
+        <button type="button" class="period-btn" id="prevMonthBtn" aria-label="Mes anterior">&#8249;</button>
+        <span class="period-label" id="periodLabel" aria-live="polite"></span>
+        <button type="button" class="period-btn" id="nextMonthBtn" aria-label="Mes siguiente">&#8250;</button>
+      </div>
+      <div class="sesion" id="sesion"></div>
+    </div>
+  </div>
+  <nav class="tabs" id="tabNav" hidden>
+    <button class="tab active" data-tab="general">Vista general</button>
+    <button class="tab" data-tab="turnos">Planificación</button>
+    <button class="tab" data-tab="personal">Personal</button>
+    <button class="tab tab-admin" data-tab="admin">Administración</button>
+  </nav>
+</header>
+
+<main id="app"></main>
+
+<dialog id="modal"></dialog>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
