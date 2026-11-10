@@ -1,9 +1,10 @@
-import { MODO_DEMO, NOMBRE_SISTEMA } from './config.js';
+import { NOMBRE_SISTEMA } from './config.js';
 import { SECCION_TECNICOS } from './defaults.js';
 import * as store from './store.js';
 import * as P from './planilla.js';
 const { data, sesion } = store;
 const { MESES, tipo, tiposOrdenados, areasOrdenadas } = P;
+const esDemo = () => store.modo === 'demo';
 
 // ---------------------------------------------------------------
 // Constantes y utilidades
@@ -310,10 +311,10 @@ function modalPersona(p, areaId) {
       <legend>Usuario de acceso</legend>
       <div class="fila-2">
         <label>Email<input name="email" type="email" autocomplete="off" value="${esc(p.email || '')}" placeholder="${tieneUsuario ? '' : 'Vacío = sin usuario'}"></label>
-        <label>${tieneUsuario ? (MODO_DEMO ? 'Nueva contraseña (opcional)' : 'Contraseña (solo si cambiás el email)') : 'Contraseña inicial'}<input name="clave" type="password" autocomplete="new-password" minlength="6" placeholder="Mínimo 6 caracteres"></label>
+        <label>${tieneUsuario ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input name="clave" type="password" autocomplete="new-password" minlength="6" placeholder="Mínimo 6 caracteres"></label>
       </div>
       <p class="ayuda">${tieneUsuario
-        ? `Ingresa con <b>${esc(p.email)}</b>. ${MODO_DEMO ? '' : 'Si olvidó la contraseña: <button type="button" class="btn-link" data-accion="modal-reset">enviarle un email para restablecerla</button>.'}`
+        ? `Ingresa con <b>${esc(p.email)}</b>. Si olvidó la contraseña, escribile una nueva acá y avisale.`
         : 'Con usuario, la persona puede ingresar, ver la planilla y pedir cambios de turno. Después puede cambiar su contraseña desde «Contraseña».'}</p>
     </fieldset>
     <p class="form-error" hidden></p>
@@ -338,11 +339,11 @@ function modalPersona(p, areaId) {
       orden: f.orden.value ? Number(f.orden.value) : null,
       email: emailNuevo ? (p.email || '') : email
     };
-    store.guardar('personas', id, datos);
-    if (emailNuevo || (MODO_DEMO && clave && email)) {
-      store.crearUsuario({ id, ...datos }, email, clave).then(err =>
-        aviso(err || (emailNuevo ? `Usuario creado: ${email}` : 'Contraseña actualizada.'), !!err));
-    }
+    Promise.resolve(store.guardar('personas', id, datos)).then(err => {
+      if (err || !(emailNuevo || (clave && email))) return;
+      store.crearUsuario({ id, ...datos }, email, clave).then(e =>
+        aviso(e || (emailNuevo ? `Usuario creado: ${email}` : 'Contraseña actualizada.'), !!e));
+    });
   }, () => store.borrar('personas', p.id), null, () => p.email);
   modalCtx.onInput = null;
 }
@@ -571,9 +572,14 @@ function vistaAdmin() {
   return `<section class="bloque">
     <div class="bloque-head"><h2>Administración</h2></div>
     <div class="tarjetas una">
-      ${MODO_DEMO ? `<article class="tarjeta">
+      ${esDemo() ? `<article class="tarjeta">
         <header><h3>Datos de ejemplo</h3><button class="btn chico peligro" data-accion="vaciar">Vaciar datos de ejemplo</button></header>
         <p class="vacio">Quita las áreas, las personas y los turnos de ejemplo para que armes tus propios grupos y rangos. Se conservan los tipos de turno, los feriados y los textos de la planilla.</p>
+      </article>` : ''}
+
+      ${store.modo === 'servidor' ? `<article class="tarjeta">
+        <header><h3>Respaldo</h3><a class="btn chico secundario" href="api/respaldo" download>Descargar respaldo</a></header>
+        <p class="vacio">Descarga una copia completa de la base de datos (turnos, personal, usuarios y solicitudes). Para restaurarla, se reemplaza el archivo <code>servidor/datos/ccd.db</code> con el servidor detenido.</p>
       </article>` : ''}
 
       <article class="tarjeta">
@@ -726,10 +732,7 @@ modal.addEventListener('click', (e) => {
   const accion = e.target.closest('[data-accion]')?.dataset.accion;
   if (accion === 'cerrar-modal') modal.close();
   if (accion === 'modal-borrar' && modalCtx.onBorrar) { modalCtx.onBorrar(); modal.close(); }
-  if (accion === 'modal-reset' && modalCtx.emailReset) {
-    const email = modalCtx.emailReset();
-    store.recuperarClave(email).then(err => aviso(err || `Le enviamos a ${email} un email para restablecer la contraseña.`, !!err && !MODO_DEMO));
-  }
+
 });
 
 let toastTimer = null;
@@ -754,7 +757,7 @@ function renderSesion() {
   const area = data.areas.find(a => a.id === u.areaId);
   const quien = `<span class="sesion-rol">${ROLES[u.rol].label}${area ? ' · ' + esc(area.nombre) : ''}</span>`;
   const cuenta = `<span class="sesion-links"><button class="btn-link claro" data-accion="clave">Contraseña</button><button class="btn-link claro" data-accion="logout">Salir</button></span>`;
-  caja.innerHTML = MODO_DEMO
+  caja.innerHTML = esDemo()
     ? `<label class="ver-como">Ver como
         <select id="verComo">${[null, ...areasOrdenadas().map(a => a.id)].map(aid => {
           const g = personasDe(aid);
@@ -775,8 +778,20 @@ function pantallaLogin() {
     <p class="form-error" hidden></p>
     <button class="btn">Ingresar</button>
     <button type="button" class="btn-link" data-accion="olvide">Olvidé mi contraseña</button>
-    ${MODO_DEMO ? `<p class="ayuda">Modo demo: cada persona de ejemplo tiene el usuario <b>apellido@ccd.demo</b>${ejemplo ? ` (por ejemplo <b>${esc(ejemplo.email)}</b>)` : ''} y la contraseña <b>${store.CLAVE_DEMO}</b>.</p>`
-      : `<div class="sep">o</div><button type="button" class="btn secundario" data-accion="login-google">Ingresar con Google</button>`}
+    ${esDemo() ? `<p class="ayuda">Modo demo: cada persona de ejemplo tiene el usuario <b>apellido@ccd.demo</b>${ejemplo ? ` (por ejemplo <b>${esc(ejemplo.email)}</b>)` : ''} y la contraseña <b>${store.CLAVE_DEMO}</b>.</p>`
+      : ''}
+  </form>`;
+}
+
+function pantallaInicial() {
+  return `<form class="acceso" data-form="inicial">
+    <h2>Configuración inicial</h2>
+    <p>La base de datos está vacía. Creá el usuario del jefe de departamento; después vas a poder cargar las áreas, el personal y sus usuarios.</p>
+    <label>Apellido y nombre<input name="nombre" required placeholder="APELLIDO, Nombre"></label>
+    <label>Email<input name="email" type="email" autocomplete="username" required></label>
+    <label>Contraseña<input name="clave" type="password" autocomplete="new-password" minlength="6" required></label>
+    <p class="form-error" hidden></p>
+    <button class="btn">Crear y entrar</button>
   </form>`;
 }
 
@@ -786,17 +801,19 @@ function render() {
   const estado = $('#statusLine');
   estado.className = 'status-line' + (sesion.error ? ' error' : '');
   estado.textContent = sesion.error ? 'Error: ' + sesion.error
-    : MODO_DEMO ? 'Modo demo · los cambios quedan solo en este navegador'
-    : sesion.estado === 'ok' ? 'Conectado' : 'Conectando…';
+    : esDemo() ? 'Modo demo · los cambios quedan solo en este navegador'
+    : sesion.estado === 'ok' ? 'Servidor local · conectado' : store.modo === 'servidor' ? 'Servidor local' : 'Conectando…';
   renderSesion();
 
   const app = $('#app');
   const nav = $('#tabNav');
   if (sesion.estado !== 'ok') {
     nav.hidden = true;
-    if (sesion.estado === 'anonimo' && app.querySelector('[data-form="login"]')) return; // no borrar lo tipeado
+    if ((sesion.estado === 'anonimo' && app.querySelector('[data-form="login"]')) ||
+        (sesion.estado === 'inicial' && app.querySelector('[data-form="inicial"]'))) return; // no borrar lo tipeado
     app.innerHTML = sesion.estado === 'cargando' ? '<p class="vacio">Cargando…</p>'
       : sesion.estado === 'anonimo' ? pantallaLogin()
+      : sesion.estado === 'inicial' ? pantallaInicial()
       : `<div class="acceso"><h2>Sin acceso</h2><p>La cuenta <b>${esc(sesion.email)}</b> no está dada de alta. Pedile a tu coordinador o al jefe de departamento que te agregue en Personal con este email.</p><button class="btn secundario" data-accion="logout">Usar otra cuenta</button></div>`;
     return;
   }
@@ -927,12 +944,11 @@ document.addEventListener('click', async (e) => {
     case 'clave': modalClave(); break;
     case 'olvide': {
       const email = $('[data-form="login"] input[name=email]')?.value.trim();
-      if (!email) { aviso('Escribí tu email y tocá de nuevo «Olvidé mi contraseña».', true); break; }
       const err = await store.recuperarClave(email);
-      aviso(err || `Te enviamos a ${email} un email para restablecer la contraseña.`, !!err && !MODO_DEMO);
+      aviso(err, false);
       break;
     }
-    case 'login-google': { const err = await store.loginGoogle(); if (err) aviso(err, true); break; }
+
     case 'pincel': ui.pincel = d.id; render(); break;
     case 'persona-nueva': modalPersona(null, d.area || null); break;
     case 'persona-editar': modalPersona(data.personas.find(x => x.id === d.id)); break;
@@ -959,6 +975,14 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('submit', async (e) => {
   const tipoForm = e.target.dataset.form;
+  if (tipoForm === 'inicial') {
+    e.preventDefault();
+    const f = e.target.elements;
+    const err = await store.inicializar({ nombre: f.nombre.value.trim(), email: f.email.value.trim(), clave: f.clave.value });
+    if (err) { const p = e.target.querySelector('.form-error'); p.textContent = err; p.hidden = false; }
+    else { e.target.remove(); ui.tab = 'admin'; render(); aviso('Listo. Empezá creando las áreas.'); }
+    return;
+  }
   if (tipoForm === 'login') {
     e.preventDefault();
     const f = e.target.elements;

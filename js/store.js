@@ -1,11 +1,8 @@
 // Capa de datos. Expone la misma interfaz para los dos modos:
-//  - demo:     localStorage, sin login (selector "Ver como").
-//  - firebase: Firestore + Firebase Authentication (Google).
-import { firebaseConfig, MODO_DEMO } from './config.js';
+//  - servidor: la página la sirve servidor/servidor.py (base SQLite local).
+//  - demo:     cualquier otro lugar (GitHub Pages, vista previa): datos de
+//              ejemplo en este navegador y selector "Ver como".
 import { TIPOS_DEFAULT, CONFIG_DEFAULT } from './defaults.js';
-
-// Clave corta -> nombre de colección
-const COLS = { areas: 'areas', personas: 'personas', tipos: 'tiposTurno', feriados: 'feriados' };
 
 export const data = {
   areas: [], personas: [], tipos: [], feriados: [],
@@ -14,12 +11,13 @@ export const data = {
   turnosSig: {},  // mes siguiente (para las columnas extra de la planilla)
   solicitudes: [] // pedidos de cambio de turno
 };
-// estado: 'cargando' | 'anonimo' | 'sin-acceso' | 'ok'
+// estado: 'cargando' | 'inicial' (servidor sin usuarios) | 'anonimo' | 'ok'
 export const sesion = { estado: 'cargando', usuario: null, email: null, error: null };
 
 let onChange = () => {};
 let periodo = { anio: 0, mes: 0 };
 let backend = null;
+export let modo = 'cargando'; // 'servidor' | 'demo'
 
 export const nuevoId = () => Math.random().toString(36).slice(2, 10);
 export const mesSiguiente = (anio, mes) => (mes === 12 ? { anio: anio + 1, mes: 1 } : { anio, mes: mes + 1 });
@@ -29,8 +27,19 @@ const turnoId = (anio, mes, personaId) => `${anio}_${String(mes).padStart(2, '0'
 export async function iniciar(cb, anio, mes) {
   onChange = cb;
   periodo = { anio, mes };
-  backend = MODO_DEMO ? demoBackend() : await firebaseBackend();
+  const estado = await detectarServidor();
+  modo = estado ? 'servidor' : 'demo';
+  backend = estado ? servidorBackend(estado) : demoBackend();
   backend.iniciar();
+}
+async function detectarServidor() {
+  if (location.protocol === 'file:') return null;
+  try {
+    const r = await fetch('api/sesion', { credentials: 'same-origin', cache: 'no-store' });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j && j.servidor ? j : null;
+  } catch (e) { return null; }
 }
 export function setPeriodo(anio, mes) { periodo = { anio, mes }; backend.periodo(); }
 export const guardar = (col, id, obj) => backend.guardar(col, id || nuevoId(), obj);
@@ -40,7 +49,7 @@ export const guardarConfig = (obj) => backend.guardarConfig(obj);
 export const setTurno = (persona, anio, mes, dia, code) => backend.setTurno(persona, anio, mes, dia, code);
 // Cuentas. Todas devuelven una promesa con un mensaje de error o null.
 export const login = (email, clave) => backend.login(email, clave);
-export const loginGoogle = () => backend.loginGoogle && backend.loginGoogle();
+export const inicializar = (datos) => backend.inicializar({ ...datos, tipos: TIPOS_DEFAULT, config: CONFIG_DEFAULT });
 export const logout = () => backend.logout();
 export const recuperarClave = (email) => backend.recuperarClave(email);
 export const cambiarClave = (nueva) => backend.cambiarClave(nueva);
@@ -284,175 +293,114 @@ function demoBackend() {
 }
 
 // ---------------------------------------------------------------
-// Backend Firebase (Firestore + Auth con Google)
+// Backend servidor local (servidor/servidor.py + SQLite)
 // ---------------------------------------------------------------
-async function firebaseBackend() {
-  const V = '10.13.0';
-  const [{ initializeApp, deleteApp }, fs, au] = await Promise.all([
-    import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
-    import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
-    import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`)
-  ]);
-  const app = initializeApp(firebaseConfig);
-  const db = fs.getFirestore(app);
-  const auth = au.getAuth(app);
-  let unsubs = [], unsubTurnos = [];
-  const fallo = (e) => { sesion.error = e.message; onChange(); };
+function servidorBackend(estado) {
+  let version = -1;
+  let escuchando = 0;           // cambia en cada login/logout para cortar el bucle anterior
+  const espera = (ms) => new Promise(r => setTimeout(r, ms));
 
-  function suscribirTurnos() {
-    unsubTurnos.forEach(u => u());
-    const sig = mesSiguiente(periodo.anio, periodo.mes);
-    unsubTurnos = [['turnos', periodo], ['turnosSig', sig]].map(([clave, p]) => {
-      const q = fs.query(fs.collection(db, 'turnos'), fs.where('anio', '==', p.anio), fs.where('mes', '==', p.mes));
-      return fs.onSnapshot(q, snap => {
-        const r = {};
-        snap.forEach(d => { r[d.data().personaId] = d.data().dias || {}; });
-        data[clave] = r;
-        onChange();
-      }, fallo);
-    });
+  async function api(ruta, cuerpo) {
+    let r;
+    try {
+      r = await fetch('api/' + ruta, cuerpo === undefined
+        ? { credentials: 'same-origin' }
+        : { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CCD': '1' }, body: JSON.stringify(cuerpo) });
+    } catch (e) {
+      return { error: 'No hay conexión con el servidor.', sinConexion: true };
+    }
+    const j = await r.json().catch(() => ({ error: `Respuesta inválida del servidor (${r.status}).` }));
+    if (r.status === 401 && ruta !== 'login') { salir(); }
+    return r.ok ? j : { error: j.error || `Error ${r.status}` };
   }
-  function suscribirTodo() {
-    Object.entries(COLS).forEach(([k, col]) => {
-      unsubs.push(fs.onSnapshot(fs.collection(db, col), snap => {
-        data[k] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        onChange();
-      }, fallo));
-    });
-    unsubs.push(fs.onSnapshot(fs.collection(db, 'solicitudes'), snap => {
-      data.solicitudes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      onChange();
-    }, fallo));
-    unsubs.push(fs.onSnapshot(fs.doc(db, 'config', 'planilla'), snap => {
-      data.config = { ...CONFIG_DEFAULT, ...(snap.exists() ? snap.data() : {}) };
-      onChange();
-    }, fallo));
-    suscribirTurnos();
+
+  function salir() {
+    escuchando++;
+    sesion.usuario = null; sesion.email = null;
+    sesion.estado = 'anonimo';
+    onChange();
   }
-  function cortar() {
-    unsubs.forEach(u => u()); unsubs = [];
-    unsubTurnos.forEach(u => u()); unsubTurnos = [];
+
+  async function cargar() {
+    const j = await api(`datos?anio=${periodo.anio}&mes=${periodo.mes}`);
+    if (j.error) { if (!j.sinConexion) sesion.error = j.error; else sesion.error = j.error; onChange(); return false; }
+    ['areas', 'personas', 'tipos', 'feriados', 'solicitudes'].forEach(k => { data[k] = j[k] || []; });
+    data.config = { ...CONFIG_DEFAULT, ...(j.config || {}) };
+    data.turnos = j.turnos || {};
+    data.turnosSig = j.turnosSig || {};
+    sesion.usuario = j.yo; sesion.email = j.yo.email;
+    sesion.estado = 'ok'; sesion.error = null;
+    version = j.version;
+    onChange();
+    return true;
   }
+
+  // Long polling: el servidor responde cuando alguien guarda algo (o a los 25 s).
+  async function escuchar() {
+    const yoEscucho = ++escuchando;
+    while (yoEscucho === escuchando) {
+      const j = await api(`cambios?desde=${version}`);
+      if (yoEscucho !== escuchando) return;
+      if (j.error) {
+        sesion.error = j.error; onChange();
+        await espera(5000);
+        if (yoEscucho === escuchando && await cargar()) sesion.error = null;
+        continue;
+      }
+      if (j.version !== version) await cargar();
+    }
+  }
+
+  async function entrar() { if (await cargar()) escuchar(); }
+
+  // Escritura: aplica, y recarga enseguida para ver el resultado.
+  async function escribir(ruta, cuerpo) {
+    const j = await api(ruta, cuerpo);
+    if (j.error) { await cargar(); return j.error; }
+    await cargar();
+    return null;
+  }
+  const mostrarError = (err) => { if (err) { sesion.error = err; onChange(); setTimeout(() => { if (sesion.error === err) { sesion.error = null; onChange(); } }, 6000); } return err; };
 
   return {
     iniciar() {
-      au.onAuthStateChanged(auth, async (user) => {
-        cortar();
-        if (!user) { sesion.estado = 'anonimo'; sesion.usuario = null; onChange(); return; }
-        sesion.email = (user.email || '').toLowerCase();
-        try {
-          const snap = await fs.getDoc(fs.doc(db, 'usuarios', sesion.email));
-          if (!snap.exists()) { sesion.estado = 'sin-acceso'; onChange(); return; }
-          const u = snap.data();
-          sesion.usuario = { id: u.personaId || null, nombre: u.nombre || user.displayName || sesion.email, rol: u.rol, areaId: u.areaId || null };
-          sesion.estado = 'ok';
-          suscribirTodo();
-        } catch (e) { sesion.estado = 'sin-acceso'; sesion.error = e.message; }
-        onChange();
-      });
+      if (!estado.inicializado) { sesion.estado = 'inicial'; onChange(); return; }
+      if (!estado.usuario) { sesion.estado = 'anonimo'; onChange(); return; }
+      entrar();
     },
-    periodo: suscribirTurnos,
-    async guardar(col, id, obj) {
-      try {
-        const batch = fs.writeBatch(db);
-        batch.set(fs.doc(db, COLS[col], id), obj, { merge: true });
-        if (col === 'personas') {
-          // Espejo en /usuarios/{email}: es lo que leen las reglas de seguridad.
-          const previa = data.personas.find(p => p.id === id);
-          const email = (obj.email || '').toLowerCase();
-          if (previa && previa.email && previa.email !== email) batch.delete(fs.doc(db, 'usuarios', previa.email));
-          if (email) batch.set(fs.doc(db, 'usuarios', email), { personaId: id, nombre: obj.nombre, rol: obj.rol, areaId: obj.areaId || null });
-        }
-        await batch.commit();
-      } catch (e) { fallo(e); }
-    },
-    async borrar(col, id) {
-      try {
-        const batch = fs.writeBatch(db);
-        batch.delete(fs.doc(db, COLS[col], id));
-        if (col === 'personas') {
-          const p = data.personas.find(x => x.id === id);
-          if (p && p.email) batch.delete(fs.doc(db, 'usuarios', p.email));
-        }
-        await batch.commit();
-      } catch (e) { fallo(e); }
-    },
-    async guardarConfig(obj) {
-      try { await fs.setDoc(fs.doc(db, 'config', 'planilla'), obj, { merge: true }); } catch (e) { fallo(e); }
-    },
+    periodo() { if (sesion.estado === 'ok') cargar(); },
+    guardar: async (col, id, obj) => mostrarError(await escribir('guardar', { col, id, obj })),
+    borrar: async (col, id) => mostrarError(await escribir('borrar', { col, id })),
+    guardarConfig: async (obj) => mostrarError(await escribir('config', { obj })),
     async setTurno(persona, anio, mes, dia, code) {
-      try {
-        const ref = fs.doc(db, 'turnos', turnoId(anio, mes, persona.id));
-        await fs.setDoc(ref, {
-          anio, mes, personaId: persona.id, areaId: persona.areaId,
-          dias: { [dia]: code || fs.deleteField() }
-        }, { merge: true });
-      } catch (e) { fallo(e); }
+      // Optimista: se pinta enseguida y después se confirma con el servidor.
+      const destino = anio === periodo.anio && mes === periodo.mes ? data.turnos : data.turnosSig;
+      const dias = destino[persona.id] || (destino[persona.id] = {});
+      if (code) dias[dia] = code; else delete dias[dia];
+      onChange();
+      const j = await api('turno', { personaId: persona.id, anio, mes, dia, code });
+      if (j.error) { mostrarError(j.error); await cargar(); }
     },
     async login(email, clave) {
-      try { await au.signInWithEmailAndPassword(auth, (email || '').trim().toLowerCase(), clave); return null; }
-      catch (e) { return mensajeAuth(e); }
-    },
-    async loginGoogle() {
-      try { await au.signInWithPopup(auth, new au.GoogleAuthProvider()); return null; }
-      catch (e) { return mensajeAuth(e); }
-    },
-    logout() { au.signOut(auth); },
-    async recuperarClave(email) {
-      try { await au.sendPasswordResetEmail(auth, (email || '').trim().toLowerCase()); return null; }
-      catch (e) { return mensajeAuth(e); }
-    },
-    async cambiarClave(nueva) {
-      try { await au.updatePassword(auth.currentUser, nueva); return null; }
-      catch (e) { return mensajeAuth(e); }
-    },
-    // Crea la cuenta con una instancia secundaria de Firebase para no cerrar
-    // la sesión de quien la está creando.
-    async crearUsuario(persona, email, clave) {
-      email = (email || '').trim().toLowerCase();
-      if (clave) {
-        const app2 = initializeApp(firebaseConfig, 'alta-' + Date.now());
-        try {
-          const a2 = au.getAuth(app2);
-          await au.createUserWithEmailAndPassword(a2, email, clave);
-          await au.signOut(a2);
-        } catch (e) {
-          if (e.code !== 'auth/email-already-in-use') return mensajeAuth(e);
-        } finally { deleteApp(app2); }
-      }
-      const { id, ...resto } = persona;
-      await this.guardar('personas', id, { ...resto, email });
+      const j = await api('login', { email, clave });
+      if (j.error) return j.error;
+      await entrar();
       return null;
     },
-    async guardarSolicitud(id, obj) {
-      try { await fs.setDoc(fs.doc(db, 'solicitudes', id), obj, { merge: true }); return null; }
-      catch (e) { return e.message; }
+    async logout() { await api('logout', {}); salir(); },
+    async inicializar(datos) {
+      const j = await api('inicializar', datos);
+      if (j.error) return j.error;
+      await entrar();
+      return null;
     },
-    // Aplica el intercambio en la planilla y marca la solicitud como aprobada,
-    // todo junto, verificando que los turnos no hayan cambiado.
-    async aprobarSolicitud(sol, cambios) {
-      const pers = [sol.deId, sol.paraId].map(id => data.personas.find(p => p.id === id));
-      if (pers.some(p => !p)) return 'Una de las personas ya no está en el sistema.';
-      try {
-        return await fs.runTransaction(db, async (tx) => {
-          const refs = {};
-          sol.dias.forEach(d => pers.forEach(p => { const k = turnoId(d.anio, d.mes, p.id); refs[k] = fs.doc(db, 'turnos', k); }));
-          const snaps = {};
-          for (const [k, ref] of Object.entries(refs)) snaps[k] = await tx.get(ref);
-          const leer = (p, d) => { const sn = snaps[turnoId(d.anio, d.mes, p.id)]; return sn.exists() ? ((sn.data().dias || {})[d.dia] || null) : null; };
-          if (sol.dias.some(d => leer(pers[0], d) !== d.de || leer(pers[1], d) !== d.para)) return CAMBIO_DESACTUALIZADO;
-          sol.dias.forEach(d => {
-            [[pers[0], d.para], [pers[1], d.de]].forEach(([p, code]) => {
-              tx.set(refs[turnoId(d.anio, d.mes, p.id)], {
-                anio: d.anio, mes: d.mes, personaId: p.id, areaId: p.areaId,
-                dias: { [d.dia]: code || fs.deleteField() }
-              }, { merge: true });
-            });
-          });
-          tx.update(fs.doc(db, 'solicitudes', sol.id), cambios);
-          return null;
-        });
-      } catch (e) { return e.message; }
-    }
+    async recuperarClave() { return 'Pedile a tu coordinador o al jefe de departamento que te asigne una contraseña nueva desde Personal.'; },
+    cambiarClave: (nueva) => escribir('clave', { nueva }),
+    crearUsuario: (persona, email, clave) => escribir('usuario', { personaId: persona.id, email, clave }),
+    guardarSolicitud(id, obj) {
+      if (obj.deId) return escribir('solicitudes/nueva', obj);
+      return escribir('solicitudes/estado', { id, estado: obj.estado, nota: obj.nota || '' });
+    },
+    aprobarSolicitud: (sol) => escribir('solicitudes/aprobar', { id: sol.id })
   };
 }
