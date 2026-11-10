@@ -5,7 +5,8 @@ rules_version = '2';
 // mantiene sincronizado cuando se edita una persona.
 //
 //   jefe                    -> escribe todo
-//   coordinador / adjunto   -> turnos y personal de SU área (solo rangos menores)
+//   coordinador / adjunto   -> turnos de SU área (su rango o menor) y alta de
+//                              personal de su área (solo rangos menores)
 //   tecnico                 -> solo lectura
 //
 // Para arrancar: creá a mano en la consola el documento
@@ -29,6 +30,12 @@ service cloud.firestore {
       return rol == 'tecnico' || (rol == 'adjunto' && yo().rol == 'coordinador');
     }
     function gestionaPersona(d) { return coordina(d.areaId) && rolMenor(d.rol); }
+    function rango(r) { return r == 'jefe' ? 4 : (r == 'coordinador' ? 3 : (r == 'adjunto' ? 2 : 1)); }
+    // Turnos: de su área y de alguien con su mismo rango o menor
+    function cargaTurnos(d) {
+      return esJefe() || (coordina(d.areaId)
+        && rango(get(/databases/$(database)/documents/personas/$(d.personaId)).data.rol) <= rango(yo().rol));
+    }
 
     match /usuarios/{userEmail} {
       allow read: if request.auth != null && (email() == userEmail || logueado());
@@ -44,12 +51,13 @@ service cloud.firestore {
     }
     match /turnos/{turnoId} {
       allow read: if logueado();
-      allow create: if esJefe() || coordina(request.resource.data.areaId);
-      allow update: if esJefe() || (coordina(resource.data.areaId) && coordina(request.resource.data.areaId));
-      allow delete: if esJefe() || coordina(resource.data.areaId);
+      allow create: if cargaTurnos(request.resource.data);
+      allow update: if cargaTurnos(resource.data) && cargaTurnos(request.resource.data);
+      allow delete: if cargaTurnos(resource.data);
     }
     match /areas/{id}      { allow read: if logueado(); allow write: if esJefe(); }
     match /tiposTurno/{id} { allow read: if logueado(); allow write: if esJefe(); }
     match /feriados/{id}   { allow read: if logueado(); allow write: if esJefe(); }
+    match /config/{id}     { allow read: if logueado(); allow write: if esJefe(); }
   }
 }

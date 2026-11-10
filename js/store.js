@@ -2,11 +2,17 @@
 //  - demo:     localStorage, sin login (selector "Ver como").
 //  - firebase: Firestore + Firebase Authentication (Google).
 import { firebaseConfig, MODO_DEMO } from './config.js';
+import { TIPOS_DEFAULT, CONFIG_DEFAULT } from './defaults.js';
 
 // Clave corta -> nombre de colección
 const COLS = { areas: 'areas', personas: 'personas', tipos: 'tiposTurno', feriados: 'feriados' };
 
-export const data = { areas: [], personas: [], tipos: [], feriados: [], turnos: {} };
+export const data = {
+  areas: [], personas: [], tipos: [], feriados: [],
+  config: { ...CONFIG_DEFAULT },
+  turnos: {},     // mes en pantalla:  { personaId: { "5": "B", ... } }
+  turnosSig: {}   // mes siguiente (para las columnas extra de la planilla)
+};
 // estado: 'cargando' | 'anonimo' | 'sin-acceso' | 'ok'
 export const sesion = { estado: 'cargando', usuario: null, email: null, error: null };
 
@@ -15,6 +21,7 @@ let periodo = { anio: 0, mes: 0 };
 let backend = null;
 
 export const nuevoId = () => Math.random().toString(36).slice(2, 10);
+export const mesSiguiente = (anio, mes) => (mes === 12 ? { anio: anio + 1, mes: 1 } : { anio, mes: mes + 1 });
 const turnoId = (anio, mes, personaId) => `${anio}_${String(mes).padStart(2, '0')}_${personaId}`;
 
 export async function iniciar(cb, anio, mes) {
@@ -26,101 +33,114 @@ export async function iniciar(cb, anio, mes) {
 export function setPeriodo(anio, mes) { periodo = { anio, mes }; backend.periodo(); }
 export const guardar = (col, id, obj) => backend.guardar(col, id || nuevoId(), obj);
 export const borrar = (col, id) => backend.borrar(col, id);
-export const setTurno = (persona, dia, code) => backend.setTurno(persona, dia, code);
+export const guardarConfig = (obj) => backend.guardarConfig(obj);
+// anio/mes explícitos: la planilla también edita los primeros días del mes siguiente.
+export const setTurno = (persona, anio, mes, dia, code) => backend.setTurno(persona, anio, mes, dia, code);
 export const login = () => backend.login();
 export const logout = () => backend.logout();
 export const vaciarDemo = () => backend.vaciar && backend.vaciar();
 export const verComo = (personaId) => backend.verComo && backend.verComo(personaId);
 
 // ---------------------------------------------------------------
-// Datos de ejemplo (solo modo demo)
+// Datos de ejemplo (solo modo demo). Nombres inventados.
 // ---------------------------------------------------------------
-// Tipos de turno tomados de la planilla de turnos del NOC (CCD).
-// grupo: 'activo' = de turno, 'pasivo' = guardia pasiva, 'ausente' = no presta servicio.
-export const TIPOS_DEFAULT = [
-  { id: 'A', label: 'Turno Alpha', horario: '12 hs · 08 a 20 h', grupo: 'activo', color: '#1F6F63' },
-  { id: 'B', label: 'Turno Bravo', horario: '6 hs', grupo: 'activo', color: '#2E5C8A' },
-  { id: 'C', label: 'Turno Charlie', horario: '12 hs · 20 a 08 h', grupo: 'activo', color: '#4A3F7A' },
-  { id: 'PAS', label: 'Pasivo Alpha', horario: 'Semana', grupo: 'pasivo', color: '#B8862E' },
-  { id: 'PAF', label: 'Pasivo Alpha', horario: 'Fin de semana', grupo: 'pasivo', color: '#8F6410' },
-  { id: 'PCS', label: 'Pasivo Charlie', horario: 'Semana', grupo: 'pasivo', color: '#C06A2B' },
-  { id: 'PCF', label: 'Pasivo Charlie', horario: 'Fin de semana', grupo: 'pasivo', color: '#9A4A17' },
-  { id: 'I', label: 'Instrucción', horario: '', grupo: 'activo', color: '#0E7C86' },
-  { id: 'F', label: 'Franco', horario: '', grupo: 'ausente', color: '#6B7280' },
-  { id: 'V', label: 'Vacaciones', horario: '', grupo: 'ausente', color: '#70803A' },
-  { id: 'LR', label: 'ART', horario: '', grupo: 'ausente', color: '#B3462C' },
-  { id: 'LF', label: 'Enfermedad familiar', horario: '', grupo: 'ausente', color: '#A8577E' },
-  { id: 'LE', label: 'Examen', horario: '', grupo: 'ausente', color: '#7A5C99' },
-  { id: 'LN', label: 'Paternidad / Maternidad', horario: '', grupo: 'ausente', color: '#5C7A99' }
-].map((t, i) => ({ ...t, orden: i + 1 }));
-
 function semilla(anio, mes) {
   const areas = [
-    { id: 'redes', nombre: 'Redes', orden: 1 },
-    { id: 'servidores', nombre: 'Servidores', orden: 2 },
-    { id: 'monitoreo', nombre: 'Monitoreo', orden: 3 }
+    { id: 'noc', nombre: 'NOC', etiqueta: 'NOC TURNO TEC/OP.', orden: 1 },
+    { id: 'redes', nombre: 'Redes', etiqueta: '', orden: 2 },
+    { id: 'servidores', nombre: 'Servidores', etiqueta: '', orden: 3 },
+    { id: 'monitoreo', nombre: 'Monitoreo', etiqueta: '', orden: 4 }
   ];
   const P = (id, nombre, rol, areaId) => ({ id, nombre, rol, areaId, email: '' });
   const personas = [
-    P('j1', 'Marta Quiroga', 'jefe', null),
-    P('r1', 'Diego Ferreyra', 'coordinador', 'redes'),
-    P('r2', 'Paula Benítez', 'adjunto', 'redes'),
-    P('r3', 'Nicolás Roldán', 'tecnico', 'redes'),
-    P('r4', 'Lucía Méndez', 'tecnico', 'redes'),
-    P('r5', 'Tomás Agüero', 'tecnico', 'redes'),
-    P('s1', 'Carla Sosa', 'coordinador', 'servidores'),
-    P('s2', 'Hernán Vidal', 'adjunto', 'servidores'),
-    P('s3', 'Julieta Paz', 'tecnico', 'servidores'),
-    P('s4', 'Matías Leiva', 'tecnico', 'servidores'),
-    P('m1', 'Sergio Ibarra', 'coordinador', 'monitoreo'),
-    P('m2', 'Ana Cabral', 'adjunto', 'monitoreo'),
-    P('m3', 'Bruno Ortiz', 'tecnico', 'monitoreo'),
-    P('m4', 'Rocío Luna', 'tecnico', 'monitoreo'),
-    P('m5', 'Iván Ponce', 'tecnico', 'monitoreo')
+    P('j1', 'QUIROGA, Marta', 'jefe', null),
+    P('n1', 'ALMADA, Rubén', 'tecnico', 'noc'),
+    P('n2', 'BAIGORRIA, Elsa', 'tecnico', 'noc'),
+    P('n3', 'CORVALÁN, Darío', 'tecnico', 'noc'),
+    P('n4', 'DOMÍNGUEZ, Inés', 'tecnico', 'noc'),
+    P('n5', 'ESCOBAR, Fabián', 'tecnico', 'noc'),
+    P('n6', 'FUNES, Graciela', 'tecnico', 'noc'),
+    P('r1', 'FERREYRA, Diego', 'coordinador', 'redes'),
+    P('r2', 'BENÍTEZ, Paula', 'adjunto', 'redes'),
+    P('r3', 'ROLDÁN, Nicolás', 'tecnico', 'redes'),
+    P('r4', 'MÉNDEZ, Lucía', 'tecnico', 'redes'),
+    P('s1', 'SOSA, Carla', 'coordinador', 'servidores'),
+    P('s2', 'VIDAL, Hernán', 'adjunto', 'servidores'),
+    P('s3', 'PAZ, Julieta', 'tecnico', 'servidores'),
+    P('m1', 'IBARRA, Sergio', 'coordinador', 'monitoreo'),
+    P('m2', 'CABRAL, Ana', 'adjunto', 'monitoreo'),
+    P('m3', 'ORTIZ, Bruno', 'tecnico', 'monitoreo'),
+    P('m4', 'LUNA, Rocío', 'tecnico', 'monitoreo')
   ];
-  // Rotación de ejemplo para el mes en curso
+  const feriados = [
+    { id: '2026-11-23', anio: 2026, mes: 11, dia: 23, nombre: 'Feriado trasladable — Día de la Soberanía Nacional (20/11).' },
+    { id: '2026-12-8', anio: 2026, mes: 12, dia: 8, nombre: 'Inmaculada Concepción de María.' },
+    { id: '2026-12-25', anio: 2026, mes: 12, dia: 25, nombre: 'Navidad.' }
+  ];
   const turnos = {};
+  const sig = mesSiguiente(anio, mes);
+  [[anio, mes], [sig.anio, sig.mes]].forEach(([a, m]) => rotacion(a, m, personas, feriados, turnos));
+  return { areas, personas, tipos: TIPOS_DEFAULT.map(t => ({ ...t })), feriados, config: { ...CONFIG_DEFAULT }, turnos };
+}
+
+// Rotación de ejemplo parecida a la planilla: el NOC rota A/C cada 3 días,
+// el resto hace B de lunes a viernes con pasivos (PCS/PCF técnicos,
+// PAS/PAF adjuntos) repartidos en rueda.
+function rotacion(anio, mes, personas, feriados, turnos) {
   const dias = new Date(anio, mes, 0).getDate();
-  areas.forEach(a => {
-    const gente = personas.filter(p => p.areaId === a.id);
-    gente.forEach((p, i) => {
-      const d = {};
-      for (let dia = 1; dia <= dias; dia++) {
-        const dow = new Date(anio, mes - 1, dia).getDay();
-        const semana = Math.floor((dia - 1) / 7);
-        const finde = dow === 0 || dow === 6;
-        const pasivo = semana % gente.length === i;
-        if (finde) { if (pasivo) d[dia] = 'PAF'; continue; }
-        if (pasivo) d[dia] = 'PAS';
-        else if ((semana + 2) % gente.length === i && semana === 1) d[dia] = 'V';
-        else d[dia] = 'B';
-      }
-      turnos[turnoId(anio, mes, p.id)] = { anio, mes, personaId: p.id, areaId: a.id, dias: d };
-    });
+  const base = Math.floor(Date.UTC(anio, mes - 1, 1) / 864e5);
+  const esFeriado = (d) => feriados.some(f => f.anio === anio && f.mes === mes && f.dia === d);
+  const noc = personas.filter(p => p.areaId === 'noc');
+  const tec = personas.filter(p => p.rol === 'tecnico' && p.areaId !== 'noc');
+  const adj = personas.filter(p => p.rol === 'adjunto');
+  const out = Object.fromEntries(personas.map(p => [p.id, {}]));
+  for (let d = 1; d <= dias; d++) {
+    const n = base + d - 1;
+    const dow = new Date(anio, mes - 1, d).getDay();
+    const finde = dow === 0 || dow === 6;
+    noc.forEach((p, i) => { if ((n + i) % 3 === 0) out[p.id][d] = i < 3 ? 'A' : 'C'; });
+    personas.filter(p => p.areaId !== 'noc').forEach(p => { if (!finde && !esFeriado(d)) out[p.id][d] = 'B'; });
+    if (!finde) {
+      out[tec[n % tec.length].id][d] = 'PCS';
+      out[adj[n % adj.length].id][d] = 'PAS';
+    } else {
+      out[tec[(n + 2) % tec.length].id][d] = 'PCF';
+      out[adj[(n + 1) % adj.length].id][d] = 'PAF';
+    }
+  }
+  // Algunas vacaciones para que se vea variedad
+  const vac = (id, desde, hasta) => { for (let d = desde; d <= Math.min(hasta, dias); d++) out[id][d] = 'V'; };
+  if (mes % 2 === 1) { vac('n4', 16, 22); vac('m4', 23, dias); } else { vac('r4', 9, 13); vac('n2', 1, 4); }
+  personas.forEach(p => {
+    turnos[turnoId(anio, mes, p.id)] = { anio, mes, personaId: p.id, areaId: p.areaId, dias: out[p.id] };
   });
-  return { areas, personas, tipos: TIPOS_DEFAULT.map(t => ({ ...t })), feriados: [], turnos };
 }
 
 // ---------------------------------------------------------------
 // Backend demo (localStorage)
 // ---------------------------------------------------------------
 function demoBackend() {
-  const KEY = 'ccd-demo-v2';
-  let db;
-  try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { db = null; }
+  const KEY = 'ccd-demo-v3';
+  let db = null;
+  try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { /* sin storage */ }
   if (!db) db = semilla(periodo.anio, periodo.mes);
 
   const persistir = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { /* sin storage */ } };
+  const delMes = (a, m) => {
+    const r = {};
+    Object.values(db.turnos).forEach(t => { if (t.anio === a && t.mes === m) r[t.personaId] = t.dias; });
+    return r;
+  };
   const refrescar = () => {
     ['areas', 'personas', 'tipos', 'feriados'].forEach(k => { data[k] = db[k]; });
-    data.turnos = {};
-    Object.values(db.turnos).forEach(t => {
-      if (t.anio === periodo.anio && t.mes === periodo.mes) data.turnos[t.personaId] = t.dias;
-    });
+    data.config = { ...CONFIG_DEFAULT, ...(db.config || {}) };
+    const sig = mesSiguiente(periodo.anio, periodo.mes);
+    data.turnos = delMes(periodo.anio, periodo.mes);
+    data.turnosSig = delMes(sig.anio, sig.mes);
     let uid = null;
     try { uid = localStorage.getItem('ccd-demo-user'); } catch (e) { /* sin storage */ }
     sesion.usuario = db.personas.find(p => p.id === uid) || db.personas.find(p => p.rol === 'jefe') || db.personas[0] || null;
-    sesion.estado = 'ok';
+    sesion.estado = sesion.usuario ? 'ok' : 'sin-acceso';
     onChange();
   };
   return {
@@ -137,17 +157,19 @@ function demoBackend() {
       if (col === 'personas') Object.keys(db.turnos).forEach(k => { if (db.turnos[k].personaId === id) delete db.turnos[k]; });
       persistir(); refrescar();
     },
-    setTurno(persona, dia, code) {
-      const id = turnoId(periodo.anio, periodo.mes, persona.id);
-      const t = db.turnos[id] || (db.turnos[id] = { ...periodo, personaId: persona.id, areaId: persona.areaId, dias: {} });
+    guardarConfig(obj) { db.config = { ...(db.config || {}), ...obj }; persistir(); refrescar(); },
+    setTurno(persona, anio, mes, dia, code) {
+      const id = turnoId(anio, mes, persona.id);
+      const t = db.turnos[id] || (db.turnos[id] = { anio, mes, personaId: persona.id, areaId: persona.areaId, dias: {} });
       if (code) t.dias[dia] = code; else delete t.dias[dia];
       persistir(); refrescar();
     },
     vaciar() {
       db = {
-        areas: [], feriados: [], turnos: {}, tipos: TIPOS_DEFAULT.map(t => ({ ...t })),
-        personas: [{ id: 'jefe', nombre: 'Jefe de departamento', rol: 'jefe', areaId: null, email: '' }]
+        areas: [], feriados: db.feriados, turnos: {}, tipos: db.tipos, config: db.config,
+        personas: [{ id: 'jefe', nombre: 'JEFE, de departamento', rol: 'jefe', areaId: null, email: '' }]
       };
+      try { localStorage.removeItem('ccd-demo-user'); } catch (e) { /* sin storage */ }
       persistir(); refrescar();
     },
     verComo(personaId) { try { localStorage.setItem('ccd-demo-user', personaId); } catch (e) { /* sin storage */ } refrescar(); },
@@ -168,18 +190,21 @@ async function firebaseBackend() {
   const app = initializeApp(firebaseConfig);
   const db = fs.getFirestore(app);
   const auth = au.getAuth(app);
-  let unsubs = [], unsubTurnos = null;
+  let unsubs = [], unsubTurnos = [];
   const fallo = (e) => { sesion.error = e.message; onChange(); };
 
   function suscribirTurnos() {
-    if (unsubTurnos) unsubTurnos();
-    const q = fs.query(fs.collection(db, 'turnos'),
-      fs.where('anio', '==', periodo.anio), fs.where('mes', '==', periodo.mes));
-    unsubTurnos = fs.onSnapshot(q, snap => {
-      data.turnos = {};
-      snap.forEach(d => { data.turnos[d.data().personaId] = d.data().dias || {}; });
-      onChange();
-    }, fallo);
+    unsubTurnos.forEach(u => u());
+    const sig = mesSiguiente(periodo.anio, periodo.mes);
+    unsubTurnos = [['turnos', periodo], ['turnosSig', sig]].map(([clave, p]) => {
+      const q = fs.query(fs.collection(db, 'turnos'), fs.where('anio', '==', p.anio), fs.where('mes', '==', p.mes));
+      return fs.onSnapshot(q, snap => {
+        const r = {};
+        snap.forEach(d => { r[d.data().personaId] = d.data().dias || {}; });
+        data[clave] = r;
+        onChange();
+      }, fallo);
+    });
   }
   function suscribirTodo() {
     Object.entries(COLS).forEach(([k, col]) => {
@@ -188,11 +213,15 @@ async function firebaseBackend() {
         onChange();
       }, fallo));
     });
+    unsubs.push(fs.onSnapshot(fs.doc(db, 'config', 'planilla'), snap => {
+      data.config = { ...CONFIG_DEFAULT, ...(snap.exists() ? snap.data() : {}) };
+      onChange();
+    }, fallo));
     suscribirTurnos();
   }
   function cortar() {
     unsubs.forEach(u => u()); unsubs = [];
-    if (unsubTurnos) { unsubTurnos(); unsubTurnos = null; }
+    unsubTurnos.forEach(u => u()); unsubTurnos = [];
   }
 
   return {
@@ -238,11 +267,14 @@ async function firebaseBackend() {
         await batch.commit();
       } catch (e) { fallo(e); }
     },
-    async setTurno(persona, dia, code) {
+    async guardarConfig(obj) {
+      try { await fs.setDoc(fs.doc(db, 'config', 'planilla'), obj, { merge: true }); } catch (e) { fallo(e); }
+    },
+    async setTurno(persona, anio, mes, dia, code) {
       try {
-        const ref = fs.doc(db, 'turnos', turnoId(periodo.anio, periodo.mes, persona.id));
+        const ref = fs.doc(db, 'turnos', turnoId(anio, mes, persona.id));
         await fs.setDoc(ref, {
-          anio: periodo.anio, mes: periodo.mes, personaId: persona.id, areaId: persona.areaId,
+          anio, mes, personaId: persona.id, areaId: persona.areaId,
           dias: { [dia]: code || fs.deleteField() }
         }, { merge: true });
       } catch (e) { fallo(e); }
