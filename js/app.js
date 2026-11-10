@@ -34,6 +34,11 @@ const colorVars = (hex) => `--c:${esc(hex)};--t:${P.contraste(hex)}`;
 // Estado de la interfaz
 // ---------------------------------------------------------------
 const hoy = new Date();
+const hoyCero = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+const pad = (n) => String(n).padStart(2, '0');
+const fechaDe = (d) => new Date(d.anio, d.mes - 1, d.dia);
+const fechaCorta = (d) => `${DIAS_SEMANA[(fechaDe(d).getDay() + 6) % 7]} ${d.dia}/${d.mes}`;
+const fechaLarga = (d) => `${DIAS_LARGO[fechaDe(d).getDay()]} ${d.dia} de ${MESES[d.mes - 1].toLowerCase()}`;
 const ui = {
   tab: 'general',
   anio: hoy.getFullYear(),
@@ -64,6 +69,16 @@ const puedeEditarPersona = (p) => esJefe() || (coordinaArea(p.areaId) && ROLES[p
 const personasDe = (areaId) => data.personas
   .filter(p => (p.areaId || null) === areaId)
   .sort((a, b) => ROLES[b.rol].rango - ROLES[a.rol].rango || a.nombre.localeCompare(b.nombre, 'es'));
+const persona = (id) => data.personas.find(p => p.id === id) || null;
+const miPersona = () => (yo() && yo().id ? persona(yo().id) : null);
+const nombreDe = (id) => persona(id)?.nombre || 'Persona eliminada';
+// Turno de cualquier fecha de los dos meses cargados (undefined = no cargado)
+function codigoFecha(pid, a, m, d) {
+  if (a === ui.anio && m === ui.mes) return (data.turnos[pid] || {})[d] || null;
+  const s = store.mesSiguiente(ui.anio, ui.mes);
+  if (a === s.anio && m === s.mes) return (data.turnosSig[pid] || {})[d] || null;
+  return undefined;
+}
 const turnoDe = (personaId, dia) => (data.turnos[personaId] || {})[dia] || null;
 const feriado = (dia) => P.esFeriado(ui.anio, ui.mes, dia);
 const areaSel = () => data.areas.find(a => a.id === ui.area) || areasOrdenadas()[0] || null;
@@ -85,6 +100,10 @@ const pildora = (code) => {
   if (!t) return '<span class="pildora vacia">Sin asignar</span>';
   return `<span class="pildora" style="${colorVars(t.color)}">${esc(t.label)}${t.horario ? ` · ${esc(t.horario)}` : ''}</span>`;
 };
+const chipTurno = (code) => {
+  const t = tipo(code);
+  return t ? `<span class="chip-turno" style="${colorVars(t.color)}" title="${esc(t.label)}">${esc(t.id)}</span>` : '<span class="chip-turno vacio" title="Sin turno">—</span>';
+};
 const rolBadge = (rol) => rol === 'tecnico' ? '' : `<span class="rol rol-${rol}">${ROLES[rol].corto}</span>`;
 
 // ---------------------------------------------------------------
@@ -95,24 +114,29 @@ function calendario(area) {
   const total = diasEnMes(ui.anio, ui.mes);
   const offset = (new Date(ui.anio, ui.mes - 1, 1).getDay() + 6) % 7; // lunes = 0
   const esMesActual = ui.anio === hoy.getFullYear() && ui.mes === hoy.getMonth() + 1;
+  const yoId = yo()?.id;
   let celdas = '';
   for (let i = 0; i < offset; i++) celdas += '<div class="dia fuera"></div>';
   for (let d = 1; d <= total; d++) {
     const dow = new Date(ui.anio, ui.mes - 1, d).getDay();
     const fer = feriado(d);
-    let fichas = '', ausentes = 0;
+    let ausentes = 0;
+    const presentes = [];
     gente.forEach(p => {
       const t = tipo(turnoDe(p.id, d));
       if (!t) return;
       if (t.grupo === 'ausente') { ausentes++; return; }
-      fichas += `<span class="ficha${t.grupo === 'pasivo' ? ' pasivo' : ''}" style="${colorVars(t.color)}" title="${esc(p.nombre)} — ${esc(t.label)}">${esc(iniciales(p.nombre))}<small>${esc(t.id)}</small></span>`;
+      presentes.push({ p, t });
     });
+    presentes.sort((x, y) => (x.t.grupo === 'pasivo') - (y.t.grupo === 'pasivo') || (x.t.orden || 0) - (y.t.orden || 0) || x.p.nombre.localeCompare(y.p.nombre, 'es'));
+    const fichas = presentes.map(({ p, t }) =>
+      `<button class="ficha${t.grupo === 'pasivo' ? ' pasivo' : ''}${p.id === yoId ? ' mia' : ''}" style="${colorVars(t.color)}" data-accion="persona-menu" data-id="${esc(p.id)}" data-dia="${d}" title="${esc(p.nombre)} — ${esc(t.label)}${t.horario ? ' · ' + esc(t.horario) : ''}"><b>${esc(t.id)}</b><span>${esc(p.nombre)}</span></button>`).join('');
     const cls = ['dia', dow === 0 || dow === 6 ? 'finde' : '', fer ? 'feriado' : '',
       esMesActual && d === hoy.getDate() ? 'hoy' : '', d === ui.dia ? 'sel' : ''].filter(Boolean).join(' ');
-    celdas += `<button class="${cls}" data-accion="dia" data-dia="${d}">
-      <span class="dia-num">${d}</span>${fer ? `<span class="dia-fer">Feriado</span>` : ''}
-      <span class="fichas">${fichas}</span>${ausentes ? `<span class="dia-aus">${ausentes} ausente${ausentes > 1 ? 's' : ''}</span>` : ''}
-    </button>`;
+    celdas += `<div class="${cls}" data-accion="dia" data-dia="${d}">
+      <div class="dia-top"><button class="dia-num" data-accion="dia" data-dia="${d}" aria-label="Ver el personal del ${d}">${d}</button>${fer ? `<span class="dia-fer" title="${esc(fer.nombre || 'Feriado')}">Feriado</span>` : ''}</div>
+      <div class="fichas">${fichas}</div>${ausentes ? `<span class="dia-aus">${ausentes} ausente${ausentes > 1 ? 's' : ''}</span>` : ''}
+    </div>`;
   }
   return `<div class="cal"><div class="cal-head">${DIAS_SEMANA.map(d => `<span>${d}</span>`).join('')}</div><div class="cal-grid">${celdas}</div></div>`;
 }
@@ -125,7 +149,7 @@ function tarjetaArea(titulo, gente, areaId) {
       <h4>${GRUPOS[g]} <span>${porGrupo[g].length}</span></h4>
       <ul>${porGrupo[g].map(p => `<li>
         <span class="avatar">${esc(iniciales(p.nombre))}</span>
-        <span class="nombre">${esc(p.nombre)} ${rolBadge(p.rol)}</span>
+        <span class="nombre"><button class="nombre-btn" data-accion="persona-menu" data-id="${esc(p.id)}" data-dia="${ui.dia}">${esc(p.nombre)}</button> ${rolBadge(p.rol)}</span>
         ${pildora(turnoDe(p.id, ui.dia))}
       </li>`).join('')}</ul>
     </div>`).join('');
@@ -149,7 +173,7 @@ function vistaGeneral() {
     <div class="bloque-head"><h2>Turnos de ${esc(area.nombre)}</h2>${chipsAreas('area', area.id, false)}</div>
     ${leyenda()}
     ${calendario(area)}
-    <p class="ayuda">Tocá un día para ver abajo el estado de todo el personal en esa fecha. Las fichas con borde punteado son turnos pasivos.</p>
+    <p class="ayuda">Tocá el nombre de un compañero para pedirle un cambio de turno, o el número del día para ver abajo el estado de todo el personal en esa fecha. Las fichas con borde punteado son turnos pasivos; la tuya está resaltada.</p>
   </section>
   <section class="bloque">
     <div class="bloque-head">
@@ -270,10 +294,10 @@ function modalPersona(p, areaId) {
   const nueva = !p;
   p = p || { nombre: '', email: '', rol: 'tecnico', areaId: areaId || null, orden: '' };
   const roles = rolesAsignables();
+  const tieneUsuario = !!p.email;
   abrirModal(`
     <h3>${nueva ? 'Agregar persona' : 'Editar persona'}</h3>
     <label>Apellido y nombre<input name="nombre" required value="${esc(p.nombre)}" placeholder="APELLIDO, Nombre"></label>
-    <label>Email de acceso (cuenta de Google)<input name="email" type="email" value="${esc(p.email || '')}" placeholder="opcional"></label>
     <div class="fila-2">
       <label>Rango<select name="rol">${roles.map(r => `<option value="${r}"${r === p.rol ? ' selected' : ''}>${ROLES[r].label}</option>`).join('')}</select></label>
       <label>Área<select name="areaId" ${esJefe() ? '' : 'disabled'}>
@@ -282,6 +306,16 @@ function modalPersona(p, areaId) {
       </select></label>
     </div>
     <label>Posición dentro de su sección en la planilla<input name="orden" type="number" min="1" value="${esc(p.orden ?? '')}" placeholder="Vacío = orden alfabético"></label>
+    <fieldset class="cuenta">
+      <legend>Usuario de acceso</legend>
+      <div class="fila-2">
+        <label>Email<input name="email" type="email" autocomplete="off" value="${esc(p.email || '')}" placeholder="${tieneUsuario ? '' : 'Vacío = sin usuario'}"></label>
+        <label>${tieneUsuario ? (MODO_DEMO ? 'Nueva contraseña (opcional)' : 'Contraseña (solo si cambiás el email)') : 'Contraseña inicial'}<input name="clave" type="password" autocomplete="new-password" minlength="6" placeholder="Mínimo 6 caracteres"></label>
+      </div>
+      <p class="ayuda">${tieneUsuario
+        ? `Ingresa con <b>${esc(p.email)}</b>. ${MODO_DEMO ? '' : 'Si olvidó la contraseña: <button type="button" class="btn-link" data-accion="modal-reset">enviarle un email para restablecerla</button>.'}`
+        : 'Con usuario, la persona puede ingresar, ver la planilla y pedir cambios de turno. Después puede cambiar su contraseña desde «Contraseña».'}</p>
+    </fieldset>
     <p class="form-error" hidden></p>
     <div class="modal-acciones">
       ${nueva ? '' : '<button type="button" class="btn peligro" data-accion="modal-borrar">Quitar</button>'}
@@ -292,11 +326,238 @@ function modalPersona(p, areaId) {
     const area = esJefe() ? (f.areaId.value || null) : p.areaId;
     if (rol === 'jefe' && area) return 'El jefe de departamento no pertenece a un área: elegí "Jefatura".';
     if (rol !== 'jefe' && !area) return 'Elegí el área a la que pertenece.';
-    store.guardar('personas', p.id, {
-      nombre: f.nombre.value.trim(), email: f.email.value.trim().toLowerCase(), rol, areaId: area,
-      orden: f.orden.value ? Number(f.orden.value) : null
-    });
-  }, () => store.borrar('personas', p.id));
+    const email = f.email.value.trim().toLowerCase();
+    const clave = f.clave.value;
+    const emailNuevo = !!email && email !== (p.email || '');
+    if (email && data.personas.some(x => x.email === email && x.id !== p.id)) return 'Ese email ya lo usa otra persona.';
+    if (emailNuevo && !clave) return 'Ingresá una contraseña inicial para crear el usuario.';
+    if (clave && clave.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
+    const id = p.id || store.nuevoId();
+    const datos = {
+      nombre: f.nombre.value.trim(), rol, areaId: area,
+      orden: f.orden.value ? Number(f.orden.value) : null,
+      email: emailNuevo ? (p.email || '') : email
+    };
+    store.guardar('personas', id, datos);
+    if (emailNuevo || (MODO_DEMO && clave && email)) {
+      store.crearUsuario({ id, ...datos }, email, clave).then(err =>
+        aviso(err || (emailNuevo ? `Usuario creado: ${email}` : 'Contraseña actualizada.'), !!err));
+    }
+  }, () => store.borrar('personas', p.id), null, () => p.email);
+  modalCtx.onInput = null;
+}
+
+function modalClave() {
+  abrirModal(`
+    <h3>Cambiar mi contraseña</h3>
+    <label>Nueva contraseña<input name="clave" type="password" autocomplete="new-password" required minlength="6"></label>
+    <label>Repetila<input name="clave2" type="password" autocomplete="new-password" required></label>
+    <p class="form-error" hidden></p>
+    <div class="modal-acciones"><button type="button" class="btn secundario" data-accion="cerrar-modal">Cancelar</button><button class="btn">Guardar</button></div>`, (f) => {
+    if (f.clave.value.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
+    if (f.clave.value !== f.clave2.value) return 'Las contraseñas no coinciden.';
+    store.cambiarClave(f.clave.value).then(err => aviso(err || 'Contraseña actualizada.', !!err));
+  });
+}
+
+// ---------------------------------------------------------------
+// CAMBIOS DE TURNO
+// ---------------------------------------------------------------
+const ESTADOS = {
+  pendiente: 'Esperando respuesta',
+  aceptada: 'Esperando aprobación',
+  rechazada: 'Rechazada',
+  cancelada: 'Cancelada',
+  aprobada: 'Aprobada · aplicada en la planilla',
+  denegada: 'Denegada'
+};
+const activa = (s) => s.estado === 'pendiente' || s.estado === 'aceptada';
+// Aprueba el jefe, o un coordinador/adjunto que pueda cargar los turnos de los dos
+// (y que no sea parte del cambio).
+const supervisa = (s) => {
+  const de = persona(s.deId), para = persona(s.paraId);
+  if (!de || !para) return esJefe();
+  return esJefe() || (puedeEditarTurnos(de) && puedeEditarTurnos(para));
+};
+const puedeAprobar = (s) => supervisa(s) && (esJefe() || (yo().id !== s.deId && yo().id !== s.paraId));
+const pendientesMios = () => data.solicitudes.filter(s =>
+  (s.estado === 'pendiente' && s.paraId === yo()?.id) || (s.estado === 'aceptada' && puedeAprobar(s))).length;
+
+function hace(ts) {
+  if (!ts) return '';
+  const min = Math.round((Date.now() - ts) / 6e4);
+  if (min < 1) return 'recién';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const f = new Date(ts);
+  return `el ${f.getDate()}/${f.getMonth() + 1}`;
+}
+
+function tarjetaSolicitud(s, botones = '') {
+  const de = nombreDe(s.deId), para = nombreDe(s.paraId);
+  return `<article class="sol sol-${s.estado}">
+    <header>
+      <span class="sol-quien"><b>${esc(de)}</b> le pide un cambio a <b>${esc(para)}</b></span>
+      <span class="estado estado-${s.estado}">${ESTADOS[s.estado] || esc(s.estado)}</span>
+    </header>
+    <div class="sol-dias">${(s.dias || []).map(d => `<div class="sol-dia">
+      <span class="sol-fecha">${fechaCorta(d)}</span>
+      <span class="sol-swap">${esc(de)}: ${chipTurno(d.de)} <i>→</i> ${chipTurno(d.para)}</span>
+      <span class="sol-swap">${esc(para)}: ${chipTurno(d.para)} <i>→</i> ${chipTurno(d.de)}</span>
+    </div>`).join('')}</div>
+    ${s.motivo ? `<p class="sol-motivo"><b>Motivo:</b> ${esc(s.motivo)}</p>` : ''}
+    ${s.nota ? `<p class="sol-motivo"><b>Nota de quien resolvió:</b> ${esc(s.nota)}</p>` : ''}
+    <footer>
+      <small>Pedida ${hace(s.creada)}${s.resueltaPorId ? ` · resuelta por ${esc(nombreDe(s.resueltaPorId))}` : ''}</small>
+      ${botones ? `<div class="sol-acc">${botones}</div>` : ''}
+    </footer>
+  </article>`;
+}
+
+function vistaCambios() {
+  const me = yo().id;
+  const sols = [...data.solicitudes].sort((a, b) => (b.creada || 0) - (a.creada || 0));
+  const responder = sols.filter(s => s.estado === 'pendiente' && s.paraId === me);
+  const aprobar = sols.filter(s => s.estado === 'aceptada' && puedeAprobar(s));
+  const mias = sols.filter(s => activa(s) && s.deId === me);
+  const enCurso = sols.filter(s => activa(s) && s.deId !== me && s.paraId !== me && !aprobar.includes(s) && supervisa(s));
+  const historial = sols.filter(s => !activa(s) && (s.deId === me || s.paraId === me || supervisa(s))).slice(0, 30);
+  const id = (s) => `data-id="${esc(s.id)}"`;
+  const bloque = (titulo, lista, botones, vacio) => `<section class="sol-bloque">
+    <h3>${titulo} ${lista.length ? `<span class="cuenta-n">${lista.length}</span>` : ''}</h3>
+    ${lista.length ? lista.map(s => tarjetaSolicitud(s, botones(s))).join('') : `<p class="vacio">${vacio}</p>`}
+  </section>`;
+  return `<section class="bloque">
+    <div class="bloque-head"><h2>Cambios de turno</h2>
+      ${miPersona() ? '<button class="btn secundario" data-accion="ir-general">Pedir un cambio</button>' : ''}</div>
+    <ol class="pasos">
+      <li><b>1</b> Tocás el nombre de un compañero en el calendario y le pedís el cambio.</li>
+      <li><b>2</b> Tu compañero lo acepta o lo rechaza.</li>
+      <li><b>3</b> Un coordinador de área o el jefe lo aprueba, y se aplica solo en la planilla.</li>
+    </ol>
+    <div class="sol-grid">
+      ${bloque('Para responder', responder, s => `<button class="btn chico secundario" data-accion="sol-rechazar" ${id(s)}>Rechazar</button><button class="btn chico" data-accion="sol-aceptar" ${id(s)}>Aceptar</button>`, 'Nadie te pidió cambios.')}
+      ${aprobar.length || esJefe() || ['coordinador', 'adjunto'].includes(yo().rol)
+        ? bloque('Para aprobar', aprobar, s => `<button class="btn chico secundario" data-accion="sol-denegar" ${id(s)}>Denegar</button><button class="btn chico" data-accion="sol-aprobar" ${id(s)}>Aprobar y aplicar</button>`, 'No hay cambios esperando tu aprobación.') : ''}
+      ${bloque('Mis solicitudes', mias, s => `<button class="btn chico secundario" data-accion="sol-cancelar" ${id(s)}>Cancelar</button>`, 'No tenés solicitudes en curso.')}
+      ${enCurso.length ? bloque('En curso en tu área', enCurso, () => '', '') : ''}
+      ${bloque('Historial', historial, () => '', 'Todavía no hay cambios resueltos.')}
+    </div>
+  </section>`;
+}
+
+function modalSolicitud(otro, dia) {
+  const yoP = miPersona();
+  const fA = { anio: ui.anio, mes: ui.mes, dia };
+  const sig = store.mesSiguiente(ui.anio, ui.mes);
+  const iso = (a, m, d) => `${a}-${pad(m)}-${pad(d)}`;
+  const desde = hoyCero > new Date(ui.anio, ui.mes - 1, 1) ? hoyCero : new Date(ui.anio, ui.mes - 1, 1);
+  const min = iso(desde.getFullYear(), desde.getMonth() + 1, desde.getDate());
+  const max = iso(sig.anio, sig.mes, diasEnMes(sig.anio, sig.mes));
+  const corto = (n) => esc(String(n).split(',')[1]?.trim() || n);
+
+  const calcular = (f) => {
+    const dias = [];
+    const sumar = (a, m, d) => dias.push({ anio: a, mes: m, dia: d, de: codigoFecha(yoP.id, a, m, d), para: codigoFecha(otro.id, a, m, d) });
+    sumar(fA.anio, fA.mes, fA.dia);
+    if (f.modo.value === 'otro') {
+      if (!f.otroDia.value) return { dias, error: 'Elegí el día tuyo que le ofrecés.' };
+      const [a, m, d] = f.otroDia.value.split('-').map(Number);
+      if (a === fA.anio && m === fA.mes && d === fA.dia) return { dias, error: 'Elegí un día distinto, o usá la opción del mismo día.' };
+      if (new Date(a, m - 1, d) < hoyCero) return { dias, error: 'No se pueden pedir cambios de días pasados.' };
+      sumar(a, m, d);
+    }
+    if (dias.some(d => d.de === undefined || d.para === undefined)) return { dias, error: `Elegí un día entre este mes y ${MESES[sig.mes - 1].toLowerCase()}.` };
+    if (dias.every(d => d.de === d.para)) return { dias, error: 'Ese día tienen el mismo turno: no hay nada que cambiar.' };
+    return { dias, cambian: dias.filter(d => d.de !== d.para) };
+  };
+  const actualizar = (f) => {
+    const { dias, error } = calcular(f);
+    const prev = modal.querySelector('#solPreview');
+    prev.innerHTML = error && dias.length < (f.modo.value === 'otro' ? 2 : 1) ? '' : `<span class="campo-label">Así quedaría</span>${dias.map(d => `<div class="sol-dia">
+      <span class="sol-fecha">${fechaCorta(d)}</span>
+      <span class="sol-swap">Vos: ${chipTurno(d.de)} <i>→</i> ${chipTurno(d.para)}</span>
+      ${d.de === d.para ? '<span class="sol-swap sin-cambio">Mismo turno: este día no cambia</span>'
+        : `<span class="sol-swap">${corto(otro.nombre)}: ${chipTurno(d.para)} <i>→</i> ${chipTurno(d.de)}</span>`}</div>`).join('')}`;
+    const pronto = dias.some(d => fechaDe(d) - Date.now() < 72 * 36e5);
+    const av = modal.querySelector('#sol72');
+    av.hidden = !pronto;
+    const miCod = codigoFecha(yoP.id, fA.anio, fA.mes, fA.dia);
+    modal.querySelector('#miTurno').innerHTML = chipTurno(miCod);
+    if (f.otroDia.value) {
+      const [a, m, d] = f.otroDia.value.split('-').map(Number);
+      const c = codigoFecha(yoP.id, a, m, d);
+      modal.querySelector('#miTurnoOtro').innerHTML = c === undefined ? '' : `Tu turno ese día: ${chipTurno(c)}`;
+    }
+  };
+  abrirModal(`
+    <h3>Solicitar cambio de turno</h3>
+    <p class="sol-intro">Le pedís a <b>${esc(otro.nombre)}</b> su turno del <b>${fechaLarga(fA)}</b>: ${chipTurno(turnoDe(otro.id, dia))}</p>
+    <fieldset class="opciones">
+      <legend>¿Qué le ofrecés a cambio?</legend>
+      <label class="radio"><input type="radio" name="modo" value="mismo" checked>
+        <span>Intercambiar ese mismo día <small>Tu turno ese día: <span id="miTurno"></span></small></span></label>
+      <label class="radio"><input type="radio" name="modo" value="otro">
+        <span>Tu turno de otro día <input type="date" name="otroDia" min="${min}" max="${max}"> <small id="miTurnoOtro"></small></span></label>
+    </fieldset>
+    <div class="sol-preview" id="solPreview"></div>
+    <label>Motivo (opcional)<textarea name="motivo" rows="2" placeholder="Ej. trámite personal, turno médico…"></textarea></label>
+    <p class="aviso chico" id="sol72" hidden>Según el reglamento, los cambios se piden con al menos 72 horas de anticipación. Podés enviarla igual: queda a criterio de quien la apruebe.</p>
+    <p class="form-error" hidden></p>
+    <div class="modal-acciones">
+      <button type="button" class="btn secundario" data-accion="cerrar-modal">Cancelar</button>
+      <button class="btn">Enviar solicitud</button>
+    </div>`, (f) => {
+    const { error, cambian } = calcular(f);
+    if (error) return error;
+    store.crearSolicitud({
+      deId: yoP.id, paraId: otro.id, dias: cambian, motivo: f.motivo.value.trim(), estado: 'pendiente',
+      creada: Date.now(), respondida: null, resuelta: null, resueltaPorId: null, nota: ''
+    }).then(err => aviso(err || `Solicitud enviada a ${otro.nombre}.`, !!err));
+  }, null, (f) => {
+    if (document.activeElement && document.activeElement.name === 'otroDia') f.modo.value = 'otro';
+    actualizar(f);
+  });
+}
+
+function modalDenegar(sol) {
+  abrirModal(`
+    <h3>Denegar cambio de turno</h3>
+    <p>${esc(nombreDe(sol.deId))} con ${esc(nombreDe(sol.paraId))}. La planilla no se modifica.</p>
+    <label>Motivo (opcional, lo ven los dos)<textarea name="nota" rows="2"></textarea></label>
+    <p class="form-error" hidden></p>
+    <div class="modal-acciones"><button type="button" class="btn secundario" data-accion="cerrar-modal">Volver</button><button class="btn peligro-lleno">Denegar</button></div>`, (f) => {
+    store.actualizarSolicitud(sol.id, { estado: 'denegada', resuelta: Date.now(), resueltaPorId: yo().id, nota: f.nota.value.trim() })
+      .then(err => aviso(err || 'Solicitud denegada.', !!err));
+  });
+}
+
+// Menú que aparece al tocar un nombre
+const menu = document.getElementById('menu');
+function cerrarMenu() { menu.hidden = true; }
+function abrirMenu(el, p, dia) {
+  const code = turnoDe(p.id, dia);
+  const fecha = { anio: ui.anio, mes: ui.mes, dia };
+  const propio = p.id === yo()?.id;
+  const pasado = fechaDe(fecha) < hoyCero;
+  const area = data.areas.find(a => a.id === p.areaId);
+  const puede = !!miPersona() && !propio && !pasado;
+  const nota = propio ? 'Es tu turno. Para cambiarlo, tocá el nombre del compañero con quien querés cambiar.'
+    : pasado ? 'No se pueden pedir cambios de días pasados.'
+    : 'Tu usuario no está asociado a una persona de la planilla.';
+  menu.innerHTML = `<div class="menu-head"><b>${esc(p.nombre)}</b><small>${ROLES[p.rol].label}${area ? ' · ' + esc(area.nombre) : ''}</small></div>
+    <div class="menu-turno"><span>${fechaLarga(fecha)}</span>${pildora(code)}</div>
+    ${puede ? `<button class="menu-op" data-accion="solicitar" data-id="${esc(p.id)}" data-dia="${dia}">Solicitar cambio de turno</button>` : `<p class="menu-nota">${nota}</p>`}`;
+  menu.hidden = false;
+  const r = el.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  const top = r.bottom + h + 8 > window.innerHeight && r.top > h + 8 ? r.top - h - 4 : r.bottom + 4;
+  menu.style.left = `${left + window.scrollX}px`;
+  menu.style.top = `${top + window.scrollY}px`;
+  const op = menu.querySelector('.menu-op');
+  if (op) op.focus();
 }
 
 // ---------------------------------------------------------------
@@ -445,11 +706,16 @@ function leerLogo(file) {
 // ---------------------------------------------------------------
 const modal = $('#modal');
 let modalCtx = null;
-function abrirModal(html, onSubmit, onBorrar) {
-  modalCtx = { onSubmit, onBorrar };
+function abrirModal(html, onSubmit, onBorrar, onInput, emailReset) {
+  cerrarMenu();
+  modalCtx = { onSubmit, onBorrar, onInput, emailReset };
   modal.innerHTML = `<form method="dialog" class="modal-form">${html}</form>`;
   modal.showModal();
+  if (onInput) onInput(modal.querySelector('form').elements);
 }
+['input', 'change'].forEach(ev => modal.addEventListener(ev, () => {
+  if (modalCtx && modalCtx.onInput) modalCtx.onInput(modal.querySelector('form').elements);
+}));
 modal.addEventListener('submit', (e) => {
   e.preventDefault();
   const error = modalCtx.onSubmit(e.target.elements);
@@ -460,6 +726,10 @@ modal.addEventListener('click', (e) => {
   const accion = e.target.closest('[data-accion]')?.dataset.accion;
   if (accion === 'cerrar-modal') modal.close();
   if (accion === 'modal-borrar' && modalCtx.onBorrar) { modalCtx.onBorrar(); modal.close(); }
+  if (accion === 'modal-reset' && modalCtx.emailReset) {
+    const email = modalCtx.emailReset();
+    store.recuperarClave(email).then(err => aviso(err || `Le enviamos a ${email} un email para restablecer la contraseña.`, !!err && !MODO_DEMO));
+  }
 });
 
 let toastTimer = null;
@@ -475,7 +745,7 @@ function aviso(texto, error) {
 // ---------------------------------------------------------------
 // Render general
 // ---------------------------------------------------------------
-const VISTAS = { general: vistaGeneral, turnos: vistaTurnos, personal: vistaPersonal, admin: vistaAdmin };
+const VISTAS = { general: vistaGeneral, turnos: vistaTurnos, cambios: vistaCambios, personal: vistaPersonal, admin: vistaAdmin };
 
 function renderSesion() {
   const caja = $('#sesion');
@@ -483,6 +753,7 @@ function renderSesion() {
   const u = yo();
   const area = data.areas.find(a => a.id === u.areaId);
   const quien = `<span class="sesion-rol">${ROLES[u.rol].label}${area ? ' · ' + esc(area.nombre) : ''}</span>`;
+  const cuenta = `<span class="sesion-links"><button class="btn-link claro" data-accion="clave">Contraseña</button><button class="btn-link claro" data-accion="logout">Salir</button></span>`;
   caja.innerHTML = MODO_DEMO
     ? `<label class="ver-como">Ver como
         <select id="verComo">${[null, ...areasOrdenadas().map(a => a.id)].map(aid => {
@@ -490,8 +761,23 @@ function renderSesion() {
           if (!g.length) return '';
           const nombre = aid ? data.areas.find(a => a.id === aid).nombre : 'Jefatura';
           return `<optgroup label="${esc(nombre)}">${g.map(p => `<option value="${esc(p.id)}"${p.id === u.id ? ' selected' : ''}>${esc(p.nombre)} — ${ROLES[p.rol].corto}</option>`).join('')}</optgroup>`;
-        }).join('')}</select></label>${quien}`
-    : `<span class="sesion-nombre">${esc(u.nombre)}</span>${quien}<button class="btn-link claro" data-accion="logout">Salir</button>`;
+        }).join('')}</select></label>${quien}${cuenta}`
+    : `<span class="sesion-nombre">${esc(u.nombre)}</span>${quien}${cuenta}`;
+}
+
+function pantallaLogin() {
+  const ejemplo = data.personas.find(p => p.rol === 'tecnico' && p.email) || data.personas.find(p => p.email);
+  return `<form class="acceso" data-form="login">
+    <h2>Ingresar</h2>
+    <p>Usá el email y la contraseña que te dio tu coordinador.</p>
+    <label>Email<input name="email" type="email" autocomplete="username" required></label>
+    <label>Contraseña<input name="clave" type="password" autocomplete="current-password" required></label>
+    <p class="form-error" hidden></p>
+    <button class="btn">Ingresar</button>
+    <button type="button" class="btn-link" data-accion="olvide">Olvidé mi contraseña</button>
+    ${MODO_DEMO ? `<p class="ayuda">Modo demo: cada persona de ejemplo tiene el usuario <b>apellido@ccd.demo</b>${ejemplo ? ` (por ejemplo <b>${esc(ejemplo.email)}</b>)` : ''} y la contraseña <b>${store.CLAVE_DEMO}</b>.</p>`
+      : `<div class="sep">o</div><button type="button" class="btn secundario" data-accion="login-google">Ingresar con Google</button>`}
+  </form>`;
 }
 
 function render() {
@@ -508,8 +794,9 @@ function render() {
   const nav = $('#tabNav');
   if (sesion.estado !== 'ok') {
     nav.hidden = true;
+    if (sesion.estado === 'anonimo' && app.querySelector('[data-form="login"]')) return; // no borrar lo tipeado
     app.innerHTML = sesion.estado === 'cargando' ? '<p class="vacio">Cargando…</p>'
-      : sesion.estado === 'anonimo' ? `<div class="acceso"><h2>Ingresar</h2><p>Entrá con tu cuenta de Google institucional para ver los turnos.</p><button class="btn" data-accion="login">Ingresar con Google</button></div>`
+      : sesion.estado === 'anonimo' ? pantallaLogin()
       : `<div class="acceso"><h2>Sin acceso</h2><p>La cuenta <b>${esc(sesion.email)}</b> no está dada de alta. Pedile a tu coordinador o al jefe de departamento que te agregue en Personal con este email.</p><button class="btn secundario" data-accion="logout">Usar otra cuenta</button></div>`;
     return;
   }
@@ -518,6 +805,10 @@ function render() {
   if (ui.tab === 'admin' && !esJefe()) ui.tab = 'general';
   if (!data.areas.some(a => a.id === ui.area)) ui.area = (yo().areaId && data.areas.some(a => a.id === yo().areaId)) ? yo().areaId : areasOrdenadas()[0]?.id || null;
   nav.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === ui.tab));
+
+  const n = pendientesMios();
+  const badge = $('#badgeCambios');
+  badge.textContent = n; badge.hidden = !n;
 
   // No repintar Administración mientras se escribe en un campo (perdería lo tipeado)
   if (ui.tab === 'admin' && app.contains(document.activeElement) && document.activeElement.matches('input, textarea')) return;
@@ -588,14 +879,18 @@ $('#tabNav').addEventListener('click', (e) => {
 });
 
 document.addEventListener('change', async (e) => {
-  if (e.target.id === 'verComo') { ui.area = null; ui.areaPlan = null; store.verComo(e.target.value); }
+  if (e.target.id === 'verComo') { ui.area = null; ui.areaPlan = null; cerrarMenu(); store.verComo(e.target.value); }
   if (e.target.id === 'logoInput' && e.target.files[0]) {
     try { store.guardarConfig({ logo: await leerLogo(e.target.files[0]) }); aviso('Logo actualizado.'); }
     catch (err) { aviso(err.message, true); }
   }
 });
 
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarMenu(); });
+window.addEventListener('resize', cerrarMenu);
+
 document.addEventListener('click', async (e) => {
+  if (!menu.hidden && !menu.contains(e.target) && !e.target.closest('[data-accion="persona-menu"]')) cerrarMenu();
   // Celdas de la planilla con teclado o pantalla táctil (el mouse pinta en pointerdown)
   const pc = e.target.closest('.pc');
   if (pc) {
@@ -610,6 +905,34 @@ document.addEventListener('click', async (e) => {
     case 'area': ui.area = d.id; render(); break;
     case 'area-plan': ui.areaPlan = d.id || null; render(); break;
     case 'dia': ui.dia = Number(d.dia); render(); break;
+    case 'persona-menu': { const p = persona(d.id); if (p) abrirMenu(el, p, Number(d.dia)); break; }
+    case 'solicitar': { cerrarMenu(); const p = persona(d.id); if (p && miPersona()) modalSolicitud(p, Number(d.dia)); break; }
+    case 'ir-general': ui.tab = 'general'; render(); break;
+    case 'sol-aceptar': case 'sol-rechazar': case 'sol-cancelar': case 'sol-aprobar': case 'sol-denegar': {
+      const sol = data.solicitudes.find(x => x.id === d.id);
+      if (!sol) break;
+      const ahora = Date.now();
+      if (d.accion === 'sol-aceptar' && sol.paraId === yo().id) store.actualizarSolicitud(sol.id, { estado: 'aceptada', respondida: ahora }).then(err => aviso(err || 'Aceptaste el cambio. Ahora falta la aprobación.', !!err));
+      if (d.accion === 'sol-rechazar' && sol.paraId === yo().id) store.actualizarSolicitud(sol.id, { estado: 'rechazada', respondida: ahora }).then(err => aviso(err || 'Rechazaste el cambio.', !!err));
+      if (d.accion === 'sol-cancelar' && sol.deId === yo().id) store.actualizarSolicitud(sol.id, { estado: 'cancelada', resuelta: ahora }).then(err => aviso(err || 'Solicitud cancelada.', !!err));
+      if (d.accion === 'sol-denegar' && puedeAprobar(sol)) modalDenegar(sol);
+      if (d.accion === 'sol-aprobar' && puedeAprobar(sol)) {
+        el.disabled = true;
+        const err = await store.aprobarSolicitud(sol, { estado: 'aprobada', resuelta: ahora, resueltaPorId: yo().id });
+        el.disabled = false;
+        aviso(err || 'Cambio aprobado y aplicado en la planilla.', !!err);
+      }
+      break;
+    }
+    case 'clave': modalClave(); break;
+    case 'olvide': {
+      const email = $('[data-form="login"] input[name=email]')?.value.trim();
+      if (!email) { aviso('Escribí tu email y tocá de nuevo «Olvidé mi contraseña».', true); break; }
+      const err = await store.recuperarClave(email);
+      aviso(err || `Te enviamos a ${email} un email para restablecer la contraseña.`, !!err && !MODO_DEMO);
+      break;
+    }
+    case 'login-google': { const err = await store.loginGoogle(); if (err) aviso(err, true); break; }
     case 'pincel': ui.pincel = d.id; render(); break;
     case 'persona-nueva': modalPersona(null, d.area || null); break;
     case 'persona-editar': modalPersona(data.personas.find(x => x.id === d.id)); break;
@@ -630,13 +953,23 @@ document.addEventListener('click', async (e) => {
         <div class="modal-acciones"><button type="button" class="btn secundario" data-accion="cerrar-modal">Cancelar</button><button class="btn">Vaciar</button></div>`,
         () => { ui.area = null; ui.areaPlan = null; store.vaciarDemo(); });
       break;
-    case 'login': store.login(); break;
     case 'logout': store.logout(); break;
   }
 });
 
-document.addEventListener('submit', (e) => {
+document.addEventListener('submit', async (e) => {
   const tipoForm = e.target.dataset.form;
+  if (tipoForm === 'login') {
+    e.preventDefault();
+    const f = e.target.elements;
+    const boton = e.target.querySelector('.btn');
+    boton.disabled = true;
+    const err = await store.login(f.email.value, f.clave.value);
+    boton.disabled = false;
+    if (err) { const p = e.target.querySelector('.form-error'); p.textContent = err; p.hidden = false; }
+    else { ui.tab = 'general'; ui.area = null; ui.areaPlan = null; e.target.remove(); render(); }
+    return;
+  }
   if (!tipoForm || !esJefe()) return;
   e.preventDefault();
   if (document.activeElement) document.activeElement.blur();

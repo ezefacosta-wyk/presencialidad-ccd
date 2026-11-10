@@ -11,7 +11,8 @@ export const data = {
   areas: [], personas: [], tipos: [], feriados: [],
   config: { ...CONFIG_DEFAULT },
   turnos: {},     // mes en pantalla:  { personaId: { "5": "B", ... } }
-  turnosSig: {}   // mes siguiente (para las columnas extra de la planilla)
+  turnosSig: {},  // mes siguiente (para las columnas extra de la planilla)
+  solicitudes: [] // pedidos de cambio de turno
 };
 // estado: 'cargando' | 'anonimo' | 'sin-acceso' | 'ok'
 export const sesion = { estado: 'cargando', usuario: null, email: null, error: null };
@@ -22,6 +23,7 @@ let backend = null;
 
 export const nuevoId = () => Math.random().toString(36).slice(2, 10);
 export const mesSiguiente = (anio, mes) => (mes === 12 ? { anio: anio + 1, mes: 1 } : { anio, mes: mes + 1 });
+export const CLAVE_DEMO = 'demo1234';
 const turnoId = (anio, mes, personaId) => `${anio}_${String(mes).padStart(2, '0')}_${personaId}`;
 
 export async function iniciar(cb, anio, mes) {
@@ -36,8 +38,17 @@ export const borrar = (col, id) => backend.borrar(col, id);
 export const guardarConfig = (obj) => backend.guardarConfig(obj);
 // anio/mes explícitos: la planilla también edita los primeros días del mes siguiente.
 export const setTurno = (persona, anio, mes, dia, code) => backend.setTurno(persona, anio, mes, dia, code);
-export const login = () => backend.login();
+// Cuentas. Todas devuelven una promesa con un mensaje de error o null.
+export const login = (email, clave) => backend.login(email, clave);
+export const loginGoogle = () => backend.loginGoogle && backend.loginGoogle();
 export const logout = () => backend.logout();
+export const recuperarClave = (email) => backend.recuperarClave(email);
+export const cambiarClave = (nueva) => backend.cambiarClave(nueva);
+export const crearUsuario = (persona, email, clave) => backend.crearUsuario(persona, email, clave);
+// Cambios de turno
+export const crearSolicitud = (obj) => backend.guardarSolicitud(nuevoId(), obj);
+export const actualizarSolicitud = (id, cambios) => backend.guardarSolicitud(id, cambios);
+export const aprobarSolicitud = (sol, cambios) => backend.aprobarSolicitud(sol, cambios);
 export const vaciarDemo = () => backend.vaciar && backend.vaciar();
 export const verComo = (personaId) => backend.verComo && backend.verComo(personaId);
 
@@ -51,7 +62,7 @@ function semilla(anio, mes) {
     { id: 'servidores', nombre: 'Servidores', etiqueta: '', orden: 3 },
     { id: 'monitoreo', nombre: 'Monitoreo', etiqueta: '', orden: 4 }
   ];
-  const P = (id, nombre, rol, areaId) => ({ id, nombre, rol, areaId, email: '' });
+  const P = (id, nombre, rol, areaId) => ({ id, nombre, rol, areaId, email: emailDemo(nombre) });
   const personas = [
     P('j1', 'QUIROGA, Marta', 'jefe', null),
     P('n1', 'ALMADA, Rubén', 'tecnico', 'noc'),
@@ -80,7 +91,39 @@ function semilla(anio, mes) {
   const turnos = {};
   const sig = mesSiguiente(anio, mes);
   [[anio, mes], [sig.anio, sig.mes]].forEach(([a, m]) => rotacion(a, m, personas, feriados, turnos));
-  return { areas, personas, tipos: TIPOS_DEFAULT.map(t => ({ ...t })), feriados, config: { ...CONFIG_DEFAULT }, turnos };
+  const claves = Object.fromEntries(personas.map(p => [p.email, CLAVE_DEMO]));
+  const db = { areas, personas, tipos: TIPOS_DEFAULT.map(t => ({ ...t })), feriados, config: { ...CONFIG_DEFAULT }, turnos, claves, solicitudes: [] };
+  solicitudesEjemplo(db);
+  return db;
+}
+const emailDemo = (nombre) => nombre.split(',')[0].normalize('NFD').replace(/[^A-Za-z]/g, '').toLowerCase() + '@ccd.demo';
+
+// Algunas solicitudes para mostrar el circuito completo
+function solicitudesEjemplo(db) {
+  const cod = (pid, a, m, d) => ((Object.values(db.turnos).find(t => t.personaId === pid && t.anio === a && t.mes === m) || {}).dias || {})[d] || null;
+  const fechas = [];
+  const h = new Date(); h.setHours(0, 0, 0, 0);
+  for (let i = 4; i < 45; i++) { const f = new Date(h); f.setDate(h.getDate() + i); fechas.push(f); }
+  const buscar = (deId, paraId, saltar = 0) => {
+    const ok = fechas.filter(f => {
+      const a = f.getFullYear(), m = f.getMonth() + 1, d = f.getDate();
+      const x = cod(deId, a, m, d), y = cod(paraId, a, m, d);
+      return x !== y && x !== null && y !== null && db.turnos[turnoId(a, m, deId)];
+    });
+    const f = ok[saltar];
+    if (!f) return null;
+    const a = f.getFullYear(), m = f.getMonth() + 1, d = f.getDate();
+    return [{ anio: a, mes: m, dia: d, de: cod(deId, a, m, d), para: cod(paraId, a, m, d) }];
+  };
+  const ahora = Date.now();
+  [
+    ['r3', 'r4', 'aceptada', 'Turno médico programado.', 0],
+    ['m3', 'm4', 'pendiente', 'Trámite personal.', 1],
+    ['s3', 'r3', 'pendiente', '', 2]
+  ].forEach(([de, para, estado, motivo, k]) => {
+    const dias = buscar(de, para, k);
+    if (dias) db.solicitudes.push({ id: 'ej' + k, deId: de, paraId: para, dias, motivo, estado, creada: ahora - (k + 1) * 36e5, respondida: estado === 'aceptada' ? ahora - 18e5 : null });
+  });
 }
 
 // Rotación de ejemplo parecida a la planilla: el NOC rota A/C cada 3 días,
@@ -116,11 +159,26 @@ function rotacion(anio, mes, personas, feriados, turnos) {
   });
 }
 
+const CAMBIO_DESACTUALIZADO = 'La planilla cambió desde que se pidió el cambio: alguno de los dos ya no tiene el turno que figura en la solicitud. Denegala y que se pida de nuevo.';
+
+const ERRORES_AUTH = {
+  'auth/invalid-credential': 'Email o contraseña incorrectos.',
+  'auth/wrong-password': 'Email o contraseña incorrectos.',
+  'auth/user-not-found': 'Email o contraseña incorrectos.',
+  'auth/invalid-email': 'El email no es válido.',
+  'auth/weak-password': 'La contraseña debe tener al menos 6 caracteres.',
+  'auth/too-many-requests': 'Demasiados intentos. Esperá unos minutos y probá de nuevo.',
+  'auth/requires-recent-login': 'Por seguridad, salí y volvé a ingresar antes de cambiar la contraseña.',
+  'auth/operation-not-allowed': 'Falta habilitar el ingreso con email y contraseña en Firebase Authentication.',
+  'auth/popup-closed-by-user': null
+};
+const mensajeAuth = (e) => (e && e.code in ERRORES_AUTH) ? ERRORES_AUTH[e.code] : (e && e.message) || 'Error desconocido.';
+
 // ---------------------------------------------------------------
 // Backend demo (localStorage)
 // ---------------------------------------------------------------
 function demoBackend() {
-  const KEY = 'ccd-demo-v3';
+  const KEY = 'ccd-demo-v4';
   let db = null;
   try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { /* sin storage */ }
   if (!db) db = semilla(periodo.anio, periodo.mes);
@@ -132,17 +190,22 @@ function demoBackend() {
     return r;
   };
   const refrescar = () => {
-    ['areas', 'personas', 'tipos', 'feriados'].forEach(k => { data[k] = db[k]; });
+    ['areas', 'personas', 'tipos', 'feriados', 'solicitudes'].forEach(k => { data[k] = db[k] || []; });
     data.config = { ...CONFIG_DEFAULT, ...(db.config || {}) };
     const sig = mesSiguiente(periodo.anio, periodo.mes);
     data.turnos = delMes(periodo.anio, periodo.mes);
     data.turnosSig = delMes(sig.anio, sig.mes);
     let uid = null;
     try { uid = localStorage.getItem('ccd-demo-user'); } catch (e) { /* sin storage */ }
-    sesion.usuario = db.personas.find(p => p.id === uid) || db.personas.find(p => p.rol === 'jefe') || db.personas[0] || null;
-    sesion.estado = sesion.usuario ? 'ok' : 'sin-acceso';
+    sesion.usuario = uid === SALIO ? null : db.personas.find(p => p.id === uid) || db.personas.find(p => p.rol === 'jefe') || db.personas[0] || null;
+    sesion.email = sesion.usuario ? sesion.usuario.email : null;
+    sesion.estado = sesion.usuario ? 'ok' : 'anonimo';
     onChange();
   };
+  const SALIO = '__salio__';
+  const usuario = (id) => { try { localStorage.setItem('ccd-demo-user', id); } catch (e) { /* sin storage */ } };
+  if (!db.claves) db.claves = {};
+  if (!db.solicitudes) db.solicitudes = [];
   return {
     iniciar() { persistir(); refrescar(); },
     periodo: refrescar,
@@ -166,14 +229,57 @@ function demoBackend() {
     },
     vaciar() {
       db = {
-        areas: [], feriados: db.feriados, turnos: {}, tipos: db.tipos, config: db.config,
-        personas: [{ id: 'jefe', nombre: 'JEFE, de departamento', rol: 'jefe', areaId: null, email: '' }]
+        areas: [], feriados: db.feriados, turnos: {}, tipos: db.tipos, config: db.config, solicitudes: [],
+        personas: [{ id: 'jefe', nombre: 'JEFE, de departamento', rol: 'jefe', areaId: null, email: 'jefe@ccd.demo' }],
+        claves: { 'jefe@ccd.demo': CLAVE_DEMO }
       };
       try { localStorage.removeItem('ccd-demo-user'); } catch (e) { /* sin storage */ }
       persistir(); refrescar();
     },
-    verComo(personaId) { try { localStorage.setItem('ccd-demo-user', personaId); } catch (e) { /* sin storage */ } refrescar(); },
-    login() {}, logout() {}
+    verComo(personaId) { usuario(personaId); refrescar(); },
+    async login(email, clave) {
+      email = (email || '').trim().toLowerCase();
+      const p = db.personas.find(x => x.email === email);
+      if (!p || db.claves[email] !== clave) return 'Email o contraseña incorrectos.';
+      usuario(p.id); refrescar(); return null;
+    },
+    logout() { usuario(SALIO); refrescar(); },
+    async recuperarClave() { return `En el modo demo todas las cuentas de ejemplo usan la contraseña ${CLAVE_DEMO}.`; },
+    async cambiarClave(nueva) {
+      if (!nueva || nueva.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
+      db.claves[sesion.usuario.email] = nueva; persistir(); return null;
+    },
+    async crearUsuario(persona, email, clave) {
+      email = (email || '').trim().toLowerCase();
+      if (!/^\S+@\S+\.\S+$/.test(email)) return 'El email no es válido.';
+      if (db.personas.some(x => x.email === email && x.id !== persona.id)) return 'Ese email ya lo usa otra persona.';
+      if (clave && clave.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
+      const p = db.personas.find(x => x.id === persona.id);
+      if (p.email && p.email !== email) delete db.claves[p.email];
+      p.email = email;
+      if (clave) db.claves[email] = clave;
+      persistir(); refrescar(); return null;
+    },
+    async guardarSolicitud(id, obj) {
+      const i = db.solicitudes.findIndex(x => x.id === id);
+      if (i >= 0) db.solicitudes[i] = { ...db.solicitudes[i], ...obj }; else db.solicitudes.push({ id, ...obj });
+      persistir(); refrescar(); return null;
+    },
+    async aprobarSolicitud(sol, cambios) {
+      const pers = [sol.deId, sol.paraId].map(id => db.personas.find(p => p.id === id));
+      if (pers.some(p => !p)) return 'Una de las personas ya no está en el sistema.';
+      const leer = (p, d) => ((db.turnos[turnoId(d.anio, d.mes, p.id)] || {}).dias || {})[d.dia] || null;
+      if (sol.dias.some(d => leer(pers[0], d) !== d.de || leer(pers[1], d) !== d.para)) return CAMBIO_DESACTUALIZADO;
+      sol.dias.forEach(d => {
+        [[pers[0], d.para], [pers[1], d.de]].forEach(([p, code]) => {
+          const id = turnoId(d.anio, d.mes, p.id);
+          const t = db.turnos[id] || (db.turnos[id] = { anio: d.anio, mes: d.mes, personaId: p.id, areaId: p.areaId, dias: {} });
+          if (code) t.dias[d.dia] = code; else delete t.dias[d.dia];
+        });
+      });
+      Object.assign(db.solicitudes.find(x => x.id === sol.id), cambios);
+      persistir(); refrescar(); return null;
+    }
   };
 }
 
@@ -182,7 +288,7 @@ function demoBackend() {
 // ---------------------------------------------------------------
 async function firebaseBackend() {
   const V = '10.13.0';
-  const [{ initializeApp }, fs, au] = await Promise.all([
+  const [{ initializeApp, deleteApp }, fs, au] = await Promise.all([
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`)
@@ -213,6 +319,10 @@ async function firebaseBackend() {
         onChange();
       }, fallo));
     });
+    unsubs.push(fs.onSnapshot(fs.collection(db, 'solicitudes'), snap => {
+      data.solicitudes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      onChange();
+    }, fallo));
     unsubs.push(fs.onSnapshot(fs.doc(db, 'config', 'planilla'), snap => {
       data.config = { ...CONFIG_DEFAULT, ...(snap.exists() ? snap.data() : {}) };
       onChange();
@@ -279,7 +389,70 @@ async function firebaseBackend() {
         }, { merge: true });
       } catch (e) { fallo(e); }
     },
-    login() { au.signInWithPopup(auth, new au.GoogleAuthProvider()).catch(fallo); },
-    logout() { au.signOut(auth); }
+    async login(email, clave) {
+      try { await au.signInWithEmailAndPassword(auth, (email || '').trim().toLowerCase(), clave); return null; }
+      catch (e) { return mensajeAuth(e); }
+    },
+    async loginGoogle() {
+      try { await au.signInWithPopup(auth, new au.GoogleAuthProvider()); return null; }
+      catch (e) { return mensajeAuth(e); }
+    },
+    logout() { au.signOut(auth); },
+    async recuperarClave(email) {
+      try { await au.sendPasswordResetEmail(auth, (email || '').trim().toLowerCase()); return null; }
+      catch (e) { return mensajeAuth(e); }
+    },
+    async cambiarClave(nueva) {
+      try { await au.updatePassword(auth.currentUser, nueva); return null; }
+      catch (e) { return mensajeAuth(e); }
+    },
+    // Crea la cuenta con una instancia secundaria de Firebase para no cerrar
+    // la sesión de quien la está creando.
+    async crearUsuario(persona, email, clave) {
+      email = (email || '').trim().toLowerCase();
+      if (clave) {
+        const app2 = initializeApp(firebaseConfig, 'alta-' + Date.now());
+        try {
+          const a2 = au.getAuth(app2);
+          await au.createUserWithEmailAndPassword(a2, email, clave);
+          await au.signOut(a2);
+        } catch (e) {
+          if (e.code !== 'auth/email-already-in-use') return mensajeAuth(e);
+        } finally { deleteApp(app2); }
+      }
+      const { id, ...resto } = persona;
+      await this.guardar('personas', id, { ...resto, email });
+      return null;
+    },
+    async guardarSolicitud(id, obj) {
+      try { await fs.setDoc(fs.doc(db, 'solicitudes', id), obj, { merge: true }); return null; }
+      catch (e) { return e.message; }
+    },
+    // Aplica el intercambio en la planilla y marca la solicitud como aprobada,
+    // todo junto, verificando que los turnos no hayan cambiado.
+    async aprobarSolicitud(sol, cambios) {
+      const pers = [sol.deId, sol.paraId].map(id => data.personas.find(p => p.id === id));
+      if (pers.some(p => !p)) return 'Una de las personas ya no está en el sistema.';
+      try {
+        return await fs.runTransaction(db, async (tx) => {
+          const refs = {};
+          sol.dias.forEach(d => pers.forEach(p => { const k = turnoId(d.anio, d.mes, p.id); refs[k] = fs.doc(db, 'turnos', k); }));
+          const snaps = {};
+          for (const [k, ref] of Object.entries(refs)) snaps[k] = await tx.get(ref);
+          const leer = (p, d) => { const sn = snaps[turnoId(d.anio, d.mes, p.id)]; return sn.exists() ? ((sn.data().dias || {})[d.dia] || null) : null; };
+          if (sol.dias.some(d => leer(pers[0], d) !== d.de || leer(pers[1], d) !== d.para)) return CAMBIO_DESACTUALIZADO;
+          sol.dias.forEach(d => {
+            [[pers[0], d.para], [pers[1], d.de]].forEach(([p, code]) => {
+              tx.set(refs[turnoId(d.anio, d.mes, p.id)], {
+                anio: d.anio, mes: d.mes, personaId: p.id, areaId: p.areaId,
+                dias: { [d.dia]: code || fs.deleteField() }
+              }, { merge: true });
+            });
+          });
+          tx.update(fs.doc(db, 'solicitudes', sol.id), cambios);
+          return null;
+        });
+      } catch (e) { return e.message; }
+    }
   };
 }

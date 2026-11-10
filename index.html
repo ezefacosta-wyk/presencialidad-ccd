@@ -32,6 +32,7 @@
   <nav class="tabs" id="tabNav" hidden>
     <button class="tab active" data-tab="general">Vista general</button>
     <button class="tab" data-tab="turnos">Planificación</button>
+    <button class="tab" data-tab="cambios">Cambios de turno <span class="badge" id="badgeCambios" hidden></span></button>
     <button class="tab" data-tab="personal">Personal</button>
     <button class="tab tab-admin" data-tab="admin">Administración</button>
   </nav>
@@ -41,6 +42,7 @@
 
 <dialog id="modal"></dialog>
 <div class="toast" id="toast" role="status" hidden></div>
+<div class="menu-persona" id="menu" role="dialog" aria-label="Opciones" hidden></div>
 
 <script type="module" src="js/app.js"></script>
 </body>

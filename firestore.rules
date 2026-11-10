@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Reglas para el modo Firebase. La jerarquía se lee de /usuarios/{email}:
+// Reglas para el modo Firebase. Ingreso con email y contraseña (o Google). La jerarquía se lee de /usuarios/{email}:
 // cada documento tiene { rol, areaId, personaId, nombre } y la app lo
 // mantiene sincronizado cuando se edita una persona.
 //
@@ -55,6 +55,38 @@ service cloud.firestore {
       allow update: if cargaTurnos(resource.data) && cargaTurnos(request.resource.data);
       allow delete: if cargaTurnos(resource.data);
     }
+    // Cambios de turno: el solicitante crea y puede cancelar; el compañero
+    // acepta o rechaza; el jefe o un coordinador/adjunto con permiso sobre
+    // los turnos de ambos aprueba (la app aplica el intercambio en la misma
+    // transacción) o deniega.
+    function puedeTurnosDe(pid) {
+      let p = get(/databases/$(database)/documents/personas/$(pid)).data;
+      return esJefe() || (coordina(p.areaId) && rango(p.rol) <= rango(yo().rol));
+    }
+    function apruebaCambio(d) {
+      return esJefe() || (puedeTurnosDe(d.deId) && puedeTurnosDe(d.paraId)
+        && yo().personaId != d.deId && yo().personaId != d.paraId);
+    }
+    function soloEstado() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['estado', 'respondida', 'resuelta', 'resueltaPorId', 'nota']);
+    }
+    match /solicitudes/{id} {
+      allow read: if logueado();
+      allow create: if logueado()
+        && request.resource.data.deId == yo().personaId
+        && request.resource.data.paraId != yo().personaId
+        && request.resource.data.estado == 'pendiente';
+      allow update: if logueado() && soloEstado() && (
+        (resource.data.paraId == yo().personaId && resource.data.estado == 'pendiente'
+          && request.resource.data.estado in ['aceptada', 'rechazada'])
+        || (resource.data.deId == yo().personaId && resource.data.estado in ['pendiente', 'aceptada']
+          && request.resource.data.estado == 'cancelada')
+        || (resource.data.estado == 'aceptada' && request.resource.data.estado in ['aprobada', 'denegada']
+          && apruebaCambio(resource.data))
+      );
+    }
+
     match /areas/{id}      { allow read: if logueado(); allow write: if esJefe(); }
     match /tiposTurno/{id} { allow read: if logueado(); allow write: if esJefe(); }
     match /feriados/{id}   { allow read: if logueado(); allow write: if esJefe(); }
