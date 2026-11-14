@@ -85,15 +85,11 @@ reglas: a cada usuario solo le envía los datos que puede ver.
   turnos de ambos, o el jefe, lo aprueba. Al aprobarse, el intercambio se
   aplica solo en la planilla (si la planilla cambió entretanto, no se
   aplica). Avisa cuando faltan menos de 72 h, como pide el reglamento.
-- **Presencialidad** — tres vistas:
-  - *Presencialidad*: grilla persona × día con EZE (Ezeiza), BOU (Bouchard),
-    C (Comisión), F (Falta), V (Vacaciones) y L (Licencia). Solo EZE y BOU
-    suman días y monto (racionamiento + movilidad por día). Se marca
-    eligiendo una opción y tocando o arrastrando sobre los días.
-  - *Remoto*: días de trabajo remoto.
-  - *Resumen anual*: días remotos de cada persona, mes a mes.
-
-  Los feriados no se pueden marcar. El jefe puede filtrar por área.
+- **Presencialidad** — grilla persona × día con EZE (Ezeiza), BOU
+  (Bouchard), C (Comisión), F (Falta), V (Vacaciones) y L (Licencia). Solo
+  EZE y BOU suman días y monto (racionamiento + movilidad por día). Se marca
+  eligiendo una opción y tocando o arrastrando sobre los días. Los feriados
+  no se pueden marcar. El jefe puede filtrar por área.
 - **Personal** — listado por área con rango y usuario; alta de personas y
   de sus usuarios (email y contraseña inicial).
 - **Administración** (solo jefe) — respaldo, áreas (y su sección en la
@@ -139,7 +135,7 @@ Documentos principales:
 | `turnos` | `anio_mes_personaId` | `anio`, `mes`, `personaId`, `areaId`, `dias` (`{"5":"TM"}`) |
 | `feriados` | `anio-mes-dia` | `anio`, `mes`, `dia`, `nombre` (leyenda que sale en el PDF) |
 | `solicitudes` | id | `deId`, `paraId`, `dias` (`[{anio, mes, dia, de, para}]`), `motivo`, `estado` (`pendiente`/`aceptada`/`rechazada`/`cancelada`/`aprobada`/`denegada`), `creada`, `respondida`, `resuelta`, `resueltaPorId`, `nota` |
-| `presencia` | `anio_mes_personaId` | `anio`, `mes`, `personaId`, `dias` (`{"5":"EZE"}`), `remoto` (`[3, 4]`) |
+| `presencia` | `anio_mes_personaId` | `anio`, `mes`, `personaId`, `dias` (`{"5":"EZE"}`) |
 | `valores` | `anio_mes` | `anio`, `mes`, `racionamiento`, `movilidad` (por día) |
 | `config` | `planilla` | `titulo`, `subtitulo`, `diasExtra`, `firma1`, `firma2`, `logo`, `textoAntes`, `textoDespues` |
 

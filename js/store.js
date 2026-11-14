@@ -10,7 +10,7 @@ export const data = {
   turnos: {},     // mes en pantalla:  { personaId: { "5": "B", ... } }
   turnosSig: {},  // mes siguiente (para las columnas extra de la planilla)
   solicitudes: [], // pedidos de cambio de turno
-  presencia: {},    // mes en pantalla, solo lo visible: { personaId: { dias: {"5": "EZE"}, remoto: [3, 4] } }
+  presencia: {},    // mes en pantalla, solo lo visible: { personaId: { dias: {"5": "EZE"} } }
   valores: { racionamiento: 0, movilidad: 0 } // valores por día del mes en pantalla
 };
 // estado: 'cargando' | 'inicial' (servidor sin usuarios) | 'anonimo' | 'ok'
@@ -61,10 +61,9 @@ export const crearUsuario = (persona, email, clave) => backend.crearUsuario(pers
 export const crearSolicitud = (obj) => backend.guardarSolicitud(nuevoId(), obj);
 export const actualizarSolicitud = (id, cambios) => backend.guardarSolicitud(id, cambios);
 export const aprobarSolicitud = (sol, cambios) => backend.aprobarSolicitud(sol, cambios);
-// Presencialidad. tipo: 'presencial' (valor = código o null) | 'remoto' (valor = true/false)
-export const setPresencia = (persona, dia, tipo, valor) => backend.setPresencia(persona, dia, tipo, valor);
+// Presencialidad: code = EZE/BOU/C/F/V/L, o null para quitar la marca
+export const setPresencia = (persona, dia, code) => backend.setPresencia(persona, dia, code);
 export const guardarValores = (racionamiento, movilidad) => backend.guardarValores(racionamiento, movilidad);
-export const resumenAnual = (anio) => backend.resumenAnual(anio);
 // Visibilidad de presencialidad: el jefe ve todo; el resto, solo su área.
 export const vePresencia = (p) => !!sesion.usuario && (sesion.usuario.rol === 'jefe' || (!!sesion.usuario.areaId && p.areaId === sesion.usuario.areaId));
 export const vaciarDemo = () => backend.vaciar && backend.vaciar();
@@ -222,7 +221,7 @@ function demoBackend() {
     data.presencia = {};
     Object.values(db.presencia).forEach(r => {
       const p = db.personas.find(x => x.id === r.personaId);
-      if (r.anio === periodo.anio && r.mes === periodo.mes && p && vePresencia(p)) data.presencia[r.personaId] = { dias: r.dias, remoto: r.remoto };
+      if (r.anio === periodo.anio && r.mes === periodo.mes && p && vePresencia(p)) data.presencia[r.personaId] = { dias: r.dias };
     });
     data.valores = db.valores[`${periodo.anio}_${pad2(periodo.mes)}`] || { racionamiento: 0, movilidad: 0 };
     onChange();
@@ -287,25 +286,16 @@ function demoBackend() {
       if (clave) db.claves[email] = clave;
       persistir(); refrescar(); return null;
     },
-    async setPresencia(persona, dia, tipo, valor) {
+    async setPresencia(persona, dia, code) {
       if (data.feriados.some(f => f.anio === periodo.anio && f.mes === periodo.mes && f.dia === dia)) return 'Ese día es feriado.';
       const id = turnoId(periodo.anio, periodo.mes, persona.id);
-      const r = db.presencia[id] || (db.presencia[id] = { anio: periodo.anio, mes: periodo.mes, personaId: persona.id, dias: {}, remoto: [] });
-      if (tipo === 'presencial') { if (valor) r.dias[dia] = valor; else delete r.dias[dia]; }
-      else { const s = new Set(r.remoto); if (valor) s.add(dia); else s.delete(dia); r.remoto = [...s].sort((a, b) => a - b); }
+      const r = db.presencia[id] || (db.presencia[id] = { anio: periodo.anio, mes: periodo.mes, personaId: persona.id, dias: {} });
+      if (code) r.dias[dia] = code; else delete r.dias[dia];
       persistir(); refrescar(); return null;
     },
     async guardarValores(racionamiento, movilidad) {
       db.valores[`${periodo.anio}_${pad2(periodo.mes)}`] = { anio: periodo.anio, mes: periodo.mes, racionamiento, movilidad };
       persistir(); refrescar(); return null;
-    },
-    async resumenAnual(anio) {
-      const out = {};
-      Object.values(db.presencia).forEach(r => {
-        const p = db.personas.find(x => x.id === r.personaId);
-        if (r.anio === anio && p && vePresencia(p)) (out[r.personaId] = out[r.personaId] || {})[r.mes] = r.remoto.length;
-      });
-      return out;
     },
     async guardarSolicitud(id, obj) {
       const i = db.solicitudes.findIndex(x => x.id === id);
@@ -442,21 +432,15 @@ function servidorBackend(estado) {
       return escribir('solicitudes/estado', { id, estado: obj.estado, nota: obj.nota || '' });
     },
     aprobarSolicitud: (sol) => escribir('solicitudes/aprobar', { id: sol.id }),
-    async setPresencia(persona, dia, tipo, valor) {
+    async setPresencia(persona, dia, code) {
       // Optimista, como los turnos
-      const r = data.presencia[persona.id] || (data.presencia[persona.id] = { dias: {}, remoto: [] });
-      if (tipo === 'presencial') { if (valor) r.dias[dia] = valor; else delete r.dias[dia]; }
-      else { const s = new Set(r.remoto); if (valor) s.add(dia); else s.delete(dia); r.remoto = [...s].sort((a, b) => a - b); }
+      const r = data.presencia[persona.id] || (data.presencia[persona.id] = { dias: {} });
+      if (code) r.dias[dia] = code; else delete r.dias[dia];
       onChange();
-      const j = await api('presencia', { personaId: persona.id, anio: periodo.anio, mes: periodo.mes, dia, tipo, valor });
+      const j = await api('presencia', { personaId: persona.id, anio: periodo.anio, mes: periodo.mes, dia, code });
       if (j.error) { mostrarError(j.error); await cargar(); return j.error; }
       return null;
     },
-    guardarValores: (racionamiento, movilidad) => escribir('presencia/valores', { anio: periodo.anio, mes: periodo.mes, racionamiento, movilidad }),
-    async resumenAnual(anio) {
-      const j = await api(`presencia/anual?anio=${anio}`);
-      if (j.error) { mostrarError(j.error); return {}; }
-      return j.remoto || {};
-    }
+    guardarValores: (racionamiento, movilidad) => escribir('presencia/valores', { anio: periodo.anio, mes: periodo.mes, racionamiento, movilidad })
   };
 }

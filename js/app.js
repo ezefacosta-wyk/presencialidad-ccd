@@ -1,5 +1,5 @@
 import { NOMBRE_SISTEMA } from './config.js';
-import { TIPOS_PRESENCIA, COLOR_REMOTO } from './defaults.js';
+import { TIPOS_PRESENCIA } from './defaults.js';
 import { SECCION_TECNICOS } from './defaults.js';
 import * as store from './store.js';
 import * as P from './planilla.js';
@@ -49,11 +49,8 @@ const ui = {
   area: null,       // área del calendario de la vista general
   areaPlan: null,   // filtro de la planilla (null = todo el departamento)
   pincel: null,     // tipo de turno activo al planificar ('' = borrar)
-  presVista: 'presencial', // 'presencial' | 'remoto' | 'anual'
   areaPres: '',     // filtro del jefe en presencialidad ('' = todo, '__jef' = jefatura)
-  pincelPres: 'EZE',
-  pincelRem: 'R',
-  anual: null       // { anio, datos } del resumen anual
+  pincelPres: 'EZE'
 };
 
 // ---------------------------------------------------------------
@@ -295,7 +292,7 @@ function gruposPresencia() {
   return grupos;
 }
 
-function grillaPresencia(tipo, grupos) {
+function grillaPresencia(grupos) {
   const n = diasEnMes(ui.anio, ui.mes);
   const cols = [];
   for (let d = 1; d <= n; d++) {
@@ -304,58 +301,33 @@ function grillaPresencia(tipo, grupos) {
   }
   const cls = (c) => [c.finde ? 'finde' : '', c.fer ? 'feriado' : ''].filter(Boolean).join(' ');
   const tit = (c) => c.fer ? ` title="${esc(c.fer.nombre || 'Feriado')}"` : '';
-  const pres = tipo === 'presencial';
-  const anchoTotal = cols.length + (pres ? 3 : 2);
+  const anchoTotal = cols.length + 3;
   const filas = grupos.map(g => `${grupos.length > 1 ? `<tr class="grupo-fila"><th colspan="${anchoTotal}">${esc(g.titulo)}</th></tr>` : ''}${g.gente.map(p => {
-    const r = data.presencia[p.id] || { dias: {}, remoto: [] };
+    const r = data.presencia[p.id] || { dias: {} };
     const editable = puedeMarcar(p);
     const celdas = cols.map(c => {
       if (c.fer) return `<td class="${cls(c)}"${tit(c)}><span class="pp bloqueada" aria-label="Feriado"></span></td>`;
-      let code = '', estilo = '', etiqueta = '';
-      if (pres) { code = r.dias[c.d] || ''; const t = tipoPres(code); if (t) { estilo = colorVars(t.color); etiqueta = t.label; } }
-      else if (r.remoto.includes(c.d)) { code = 'R'; estilo = colorVars(COLOR_REMOTO); etiqueta = 'Remoto'; }
-      return `<td class="${cls(c)}"><button class="pp${code ? ' llena' : ''}" ${estilo ? `style="${estilo}"` : ''} data-k="${pres ? 'pres' : 'rem'}" data-p="${esc(p.id)}" data-d="${c.d}" data-c="${code}" ${editable ? '' : 'disabled'} aria-label="${esc(p.nombre)}, ${c.d}/${ui.mes}${etiqueta ? ', ' + etiqueta : ''}">${code}</button></td>`;
+      const code = r.dias[c.d] || '';
+      const t = tipoPres(code);
+      const estilo = t ? colorVars(t.color) : '', etiqueta = t ? t.label : '';
+      return `<td class="${cls(c)}"><button class="pp${code ? ' llena' : ''}" ${estilo ? `style="${estilo}"` : ''} data-k="pres" data-p="${esc(p.id)}" data-d="${c.d}" data-c="${code}" ${editable ? '' : 'disabled'} aria-label="${esc(p.nombre)}, ${c.d}/${ui.mes}${etiqueta ? ', ' + etiqueta : ''}">${code}</button></td>`;
     }).join('');
-    const dias = pres ? diasQueCuentan(r) : r.remoto.length;
+    const dias = diasQueCuentan(r);
     return `<tr class="${p.id === yo()?.id ? 'fila-mia' : ''}"><th class="p-nom">${esc(p.nombre)} ${rolBadge(p.rol)}</th>${celdas}
-      <td class="p-h p-real">${dias}</td>${pres ? `<td class="p-h p-plata">${plata.format(dias * porDia())}</td>` : ''}</tr>`;
+      <td class="p-h p-real">${dias}</td><td class="p-h p-plata">${plata.format(dias * porDia())}</td></tr>`;
   }).join('')}`).join('');
   return `<div class="tabla-wrap"><table class="planilla grilla-pres">
     <thead>
       <tr><th class="p-nom" rowspan="2">Persona</th>${cols.map(c => `<th class="${cls(c)}"${tit(c)}>${P.DIAS3[c.dow]}</th>`).join('')}
-        <th class="p-h" rowspan="2">Días</th>${pres ? '<th class="p-h" rowspan="2">Total</th>' : ''}</tr>
+        <th class="p-h" rowspan="2">Días</th><th class="p-h" rowspan="2">Total</th></tr>
       <tr>${cols.map(c => `<th class="${cls(c)}"${tit(c)}>${c.d}</th>`).join('')}</tr>
     </thead>
     <tbody>${filas}</tbody>
   </table></div>`;
 }
 
-function resumenAnual(grupos) {
-  if (!ui.anual || ui.anual.anio !== ui.anio) {
-    if (!ui.anualCargando) {
-      ui.anualCargando = true;
-      const anio = ui.anio;
-      store.resumenAnual(anio).then(datos => { ui.anual = { anio, datos }; ui.anualCargando = false; render(); });
-    }
-    return '<p class="vacio">Cargando el resumen…</p>';
-  }
-  const datos = ui.anual.datos;
-  const filas = grupos.map(g => `${grupos.length > 1 ? `<tr class="grupo-fila"><th colspan="14">${esc(g.titulo)}</th></tr>` : ''}${g.gente.map(p => {
-    const m = datos[p.id] || {};
-    let total = 0;
-    const celdas = MESES.map((_, i) => { const v = Number(m[i + 1]) || 0; total += v; return `<td class="p-h${v ? '' : ' cero'}">${v}</td>`; }).join('');
-    return `<tr><th class="p-nom">${esc(p.nombre)}</th>${celdas}<td class="p-h p-real">${total}</td></tr>`;
-  }).join('')}`).join('');
-  return `<div class="tabla-wrap"><table class="planilla grilla-pres anual">
-    <thead><tr><th class="p-nom">Persona</th>${MESES.map(m => `<th>${m.slice(0, 3)}</th>`).join('')}<th class="p-h">Total ${ui.anual.anio}</th></tr></thead>
-    <tbody>${filas}</tbody>
-  </table></div>
-  <p class="ayuda">Días de trabajo remoto por mes. La presencialidad no se incluye en el resumen anual.</p>`;
-}
-
 function vistaPresencia() {
   const grupos = gruposPresencia();
-  const vista = ui.presVista;
   const area = data.areas.find(a => a.id === yo().areaId);
   const editables = grupos.some(g => g.gente.some(puedeMarcar));
   const alcance = esJefe()
@@ -364,11 +336,6 @@ function vistaPresencia() {
           `<button class="chip-area${ui.areaPres === id ? ' activa' : ''}" data-accion="area-pres" data-id="${esc(id)}">${esc(nombre)}</button>`).join('')}
       </div>`
     : `<p class="alcance">Ves solo el personal de <b>${esc(area ? area.nombre : 'tu área')}</b>.${yo().rol === 'tecnico' ? ' Podés marcar tu propia fila.' : ' Podés marcar tu fila y las de tu área.'}</p>`;
-
-  const subtabs = `<div class="segmentado" role="tablist">
-    ${[['presencial', 'Presencialidad'], ['remoto', 'Remoto'], ['anual', 'Resumen anual']].map(([id, txt]) =>
-      `<button class="${vista === id ? 'activo' : ''}" data-accion="pres-vista" data-id="${id}" role="tab" aria-selected="${vista === id}">${txt}</button>`).join('')}
-  </div>`;
 
   const valores = `<div class="valores">
       <div><span>Racionamiento</span><b>${plata.format(Number(data.valores.racionamiento) || 0)}</b></div>
@@ -381,26 +348,20 @@ function vistaPresencia() {
       </form>` : ''}
     </div>`;
 
-  const pinceles = vista === 'presencial'
-    ? `<div class="pinceles"><span class="pinceles-label">Marcar:</span>
-        ${TIPOS_PRESENCIA.map(t => `<button class="pincel${ui.pincelPres === t.id ? ' activo' : ''}" style="${colorVars(t.color)}" data-accion="pincel-pres" data-id="${t.id}"><b>${t.id}</b></button>`).join('')}
-        <button class="pincel borrar${ui.pincelPres === '' ? ' activo' : ''}" data-accion="pincel-pres" data-id="">Borrar</button>
-        <span class="pincel-desc">${ui.pincelPres ? `${tipoPres(ui.pincelPres).label}${tipoPres(ui.pincelPres).cuenta ? ' · suma días y monto' : ' · se registra pero no suma'}` : 'Vacía las celdas'}</span></div>`
-    : `<div class="pinceles"><span class="pinceles-label">Marcar:</span>
-        <button class="pincel${ui.pincelRem === 'R' ? ' activo' : ''}" style="${colorVars(COLOR_REMOTO)}" data-accion="pincel-rem" data-id="R"><b>R</b> Remoto</button>
-        <button class="pincel borrar${ui.pincelRem === '' ? ' activo' : ''}" data-accion="pincel-rem" data-id="">Quitar</button></div>`;
+  const pinceles = `<div class="pinceles"><span class="pinceles-label">Marcar:</span>
+      ${TIPOS_PRESENCIA.map(t => `<button class="pincel${ui.pincelPres === t.id ? ' activo' : ''}" style="${colorVars(t.color)}" data-accion="pincel-pres" data-id="${t.id}"><b>${t.id}</b></button>`).join('')}
+      <button class="pincel borrar${ui.pincelPres === '' ? ' activo' : ''}" data-accion="pincel-pres" data-id="">Borrar</button>
+      <span class="pincel-desc">${ui.pincelPres ? `${tipoPres(ui.pincelPres).label}${tipoPres(ui.pincelPres).cuenta ? ' · suma días y monto' : ' · se registra pero no suma'}` : 'Vacía las celdas'}</span></div>`;
 
   const vacio = '<p class="vacio">No hay personal para mostrar.</p>';
-  let cuerpo;
-  if (vista === 'anual') cuerpo = grupos.length ? resumenAnual(grupos) : vacio;
-  else cuerpo = `${vista === 'presencial' ? valores : ''}
+  const cuerpo = `${valores}
     ${editables ? pinceles : ''}
     ${editables ? '<p class="ayuda">Elegí una opción y tocá los días, o mantené apretado el mouse y arrastrá para marcar varios seguidos. Tocar un día que ya tiene esa marca la quita. Los feriados no se pueden marcar.</p>' : ''}
-    ${grupos.length ? grillaPresencia(vista, grupos) : vacio}
-    ${vista === 'presencial' ? `<p class="ayuda">Solo <b>EZE</b> y <b>BOU</b> suman días y monto (racionamiento + movilidad por día). Comisión, Falta, Vacaciones y Licencia quedan registradas sin sumar.</p>` : ''}`;
+    ${grupos.length ? grillaPresencia(grupos) : vacio}
+    <p class="ayuda">Solo <b>EZE</b> y <b>BOU</b> suman días y monto (racionamiento + movilidad por día). Comisión, Falta, Vacaciones y Licencia quedan registradas sin sumar.</p>`;
 
   return `<section class="bloque">
-    <div class="bloque-head"><h2>${vista === 'anual' ? `Resumen anual ${ui.anio}` : `Presencialidad · ${MESES[ui.mes - 1]} ${ui.anio}`}</h2>${subtabs}</div>
+    <div class="bloque-head"><h2>Presencialidad · ${MESES[ui.mes - 1]} ${ui.anio}</h2></div>
     <div class="bloque-sub">${alcance}</div>
     ${cuerpo}
   </section>`;
@@ -988,23 +949,23 @@ function render() {
 // ---------------------------------------------------------------
 let arrastre = null;
 let ultimoFueMouse = false;
-// Celdas pintables: .pc (planilla de turnos) y .pp (presencialidad / remoto, data-k)
+// Celdas pintables: .pc (planilla de turnos) y .pp (presencialidad)
 const CELDA = '.pc, .pp:not(.bloqueada)';
 function pintar(el, code) {
   const p = data.personas.find(x => x.id === el.dataset.p);
   if (!p) return;
   if ((el.dataset.c || null) === (code || null)) return;
   const k = el.dataset.k;
-  if (k === 'pres' || k === 'rem') {
+  if (k === 'pres') {
     if (!puedeMarcar(p)) return;
-    store.setPresencia(p, Number(el.dataset.d), k === 'pres' ? 'presencial' : 'remoto', k === 'pres' ? code : !!code)
+    store.setPresencia(p, Number(el.dataset.d), code)
       .then(err => { if (err) aviso(err, true); });
     return;
   }
   if (!puedeEditarTurnos(p)) return;
   store.setTurno(p, Number(el.dataset.a), Number(el.dataset.m), Number(el.dataset.d), code);
 }
-const pincelDe = (el) => el.dataset.k === 'pres' ? ui.pincelPres : el.dataset.k === 'rem' ? ui.pincelRem : ui.pincel;
+const pincelDe = (el) => el.dataset.k === 'pres' ? ui.pincelPres : ui.pincel;
 const destino = (el) => { const b = pincelDe(el); return b && b !== (el.dataset.c || '') ? b : null; };
 const claveCelda = (el) => `${el.dataset.k || 't'}|${el.dataset.p}|${el.dataset.a}|${el.dataset.m}|${el.dataset.d}`;
 
@@ -1107,9 +1068,7 @@ document.addEventListener('click', async (e) => {
 
     case 'pincel': ui.pincel = d.id; render(); break;
     case 'pincel-pres': ui.pincelPres = d.id; render(); break;
-    case 'pincel-rem': ui.pincelRem = d.id; render(); break;
     case 'area-pres': ui.areaPres = d.id; render(); break;
-    case 'pres-vista': ui.presVista = d.id; if (d.id === 'anual') ui.anual = null; render(); break;
     case 'persona-nueva': modalPersona(null, d.area || null); break;
     case 'persona-editar': modalPersona(data.personas.find(x => x.id === d.id)); break;
     case 'area-editar': if (esJefe()) modalArea(data.areas.find(x => x.id === d.id)); break;

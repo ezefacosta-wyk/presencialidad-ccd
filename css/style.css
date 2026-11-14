@@ -293,10 +293,6 @@ form.acceso .btn-link{align-self:center;}
 .sol-swap.sin-cambio{color:var(--ink-soft);font-style:italic;font-size:12.5px;}
 
 /* ---------- Presencialidad ---------- */
-.segmentado{display:inline-flex;border:1px solid var(--rule-strong);border-radius:var(--radius);overflow:hidden;background:var(--paper-raised);}
-.segmentado button{background:none;border:none;border-right:1px solid var(--rule-strong);padding:7px 14px;font-weight:500;color:var(--ink-soft);}
-.segmentado button:last-child{border-right:none;}
-.segmentado button.activo{background:var(--ink);color:var(--paper-raised);}
 .alcance{margin:0;font-size:13.5px;color:var(--ink-soft);}
 .valores{display:flex;flex-wrap:wrap;align-items:stretch;gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;}
 .valores > div{background:var(--paper-raised);padding:10px 16px;display:flex;flex-direction:column;gap:2px;min-width:150px;}
@@ -309,14 +305,9 @@ form.acceso .btn-link{align-self:center;}
 .grilla-pres .p-plata{min-width:96px;font-size:11px;white-space:nowrap;padding:0 6px;}
 .grilla-pres tr.grupo-fila th{position:sticky;left:0;background:var(--ink) !important;color:var(--paper-raised);text-align:left;padding:5px 10px;font-family:'IBM Plex Sans',sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;}
 .grilla-pres tr.fila-mia .p-nom{box-shadow:inset 4px 0 0 var(--acento);}
-.grilla-pres.anual th,.grilla-pres.anual td{min-width:48px;}
-.grilla-pres.anual td.cero{color:var(--rule-strong);}
 .pp{width:30px;height:26px;border:none;background:transparent;font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;color:var(--t);display:block;padding:0;}
 .pp.llena{background:var(--c);}
 .pp:not(:disabled):not(.bloqueada){cursor:cell;}
 .pp:not(:disabled):not(.bloqueada):hover{box-shadow:inset 0 0 0 2px var(--ink);}
 .pp:disabled{opacity:.5;cursor:default;}
 .pp.bloqueada{background:repeating-linear-gradient(135deg,transparent 0 4px,rgba(179,70,44,.18) 4px 8px);}
-table.grilla-pres.anual{width:100%;}
-.grilla-pres.anual tbody th,.grilla-pres.anual tbody td{height:32px;}
-.grilla-pres.anual thead th{height:30px;}

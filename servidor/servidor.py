@@ -272,7 +272,7 @@ class Api:
             for r in self.db.listar('presencia'):
                 p = personas.get(r.get('personaId'))
                 if r.get('anio') == anio and r.get('mes') == mes and p and ve_presencia(yo, p):
-                    presencia[r['personaId']] = {'dias': r.get('dias') or {}, 'remoto': r.get('remoto') or []}
+                    presencia[r['personaId']] = {'dias': r.get('dias') or {}}
             return {
                 'version': self.db.version,
                 'yo': yo,
@@ -394,7 +394,7 @@ class Api:
             anio, mes, dia = int(c['anio']), int(c['mes']), int(c['dia'])
         except (KeyError, TypeError, ValueError):
             raise ErrorApi('Fecha inválida.')
-        pid, tipo, valor = str(c.get('personaId', '')), c.get('tipo'), c.get('valor')
+        pid, code = str(c.get('personaId', '')), c.get('code') or None
         with self.db.transaccion() as db:
             p = db.get('personas', pid)
             if not p:
@@ -404,20 +404,13 @@ class Api:
             if db.get('feriados', f'{anio}-{mes}-{dia}'):
                 raise ErrorApi('Ese día es feriado.')
             rid = turno_id(anio, mes, pid)
-            r = db.get('presencia', rid) or {'anio': anio, 'mes': mes, 'personaId': pid, 'dias': {}, 'remoto': []}
-            if tipo == 'presencial':
-                if valor and valor not in CODIGOS_PRESENCIA:
-                    raise ErrorApi('Código de presencialidad inválido.')
-                if valor:
-                    r['dias'][str(dia)] = valor
-                else:
-                    r['dias'].pop(str(dia), None)
-            elif tipo == 'remoto':
-                dias = set(r.get('remoto') or [])
-                (dias.add if valor else dias.discard)(dia)
-                r['remoto'] = sorted(dias)
+            r = db.get('presencia', rid) or {'anio': anio, 'mes': mes, 'personaId': pid, 'dias': {}}
+            if code and code not in CODIGOS_PRESENCIA:
+                raise ErrorApi('Código de presencialidad inválido.')
+            if code:
+                r['dias'][str(dia)] = code
             else:
-                raise ErrorApi('Tipo inválido.')
+                r['dias'].pop(str(dia), None)
             db.poner('presencia', rid, r, merge=False)
         return {}
 
@@ -434,16 +427,6 @@ class Api:
         with self.db.transaccion() as db:
             db.poner('valores', f'{anio}_{mes:02d}', {'anio': anio, 'mes': mes, 'racionamiento': rac, 'movilidad': mov}, merge=False)
         return {}
-
-    def anual(self, yo, anio):
-        with self.db.lock:
-            personas = {p['id']: p for p in self.db.listar('personas')}
-            out = {}
-            for r in self.db.listar('presencia'):
-                p = personas.get(r.get('personaId'))
-                if r.get('anio') == anio and p and ve_presencia(yo, p):
-                    out.setdefault(r['personaId'], {})[str(r['mes'])] = len(r.get('remoto') or [])
-            return out
 
     def usuario(self, yo, c):
         pid = str(c.get('personaId', ''))
@@ -662,12 +645,6 @@ class Manejador(BaseHTTPRequestHandler):
         if ruta == 'cambios':
             desde = int((q.get('desde') or ['0'])[0])
             return self.enviar(200, {'version': api.db.esperar_cambio(desde)})
-        if ruta == 'presencia/anual':
-            try:
-                anio = int(q['anio'][0])
-            except (KeyError, ValueError):
-                raise ErrorApi('Año inválido.')
-            return self.enviar(200, {'remoto': api.anual(yo, anio)})
         if ruta == 'respaldo':
             if not es_jefe(yo):
                 raise ErrorApi('Solo el jefe de departamento puede descargar el respaldo.', 403)

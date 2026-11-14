@@ -65,4 +65,3 @@ export const TIPOS_PRESENCIA = [
   { id: 'V', label: 'Vacaciones', cuenta: false, color: '#9DB66A' },
   { id: 'L', label: 'Licencia', cuenta: false, color: '#7A5C99' }
 ];
-export const COLOR_REMOTO = '#4F6FA8';
