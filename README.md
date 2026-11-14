@@ -1,8 +1,9 @@
 # Turnos y Presencialidad · CCD
 
 Sistema web para organizar los turnos del departamento por área, con
-jerarquía de personal, permisos por rango, cambios de turno entre compañeros
-y exportación de la planilla a PDF. Es la evolución del
+jerarquía de personal, permisos por rango, cambios de turno entre compañeros,
+exportación de la planilla a PDF y control de presencialidad (racionamiento
+y movilidad). Es la evolución del
 [Registro de Presencialidad](https://github.com/ezefacosta-wyk/racionamientos).
 
 Funciona de dos maneras, y la página elige sola:
@@ -58,6 +59,13 @@ la web y limita los intentos de ingreso fallidos.
 Cada persona cambia su propia contraseña desde **Contraseña**, arriba a la
 derecha.
 
+**Presencialidad** tiene una regla de visibilidad propia: coordinadores,
+adjuntos y técnicos ven **solo el personal de su área**; el jefe ve todo el
+departamento. Cada uno marca su propia fila; coordinadores y adjuntos también
+las de su área (de su mismo rango o menor), y el jefe todas. Los valores de
+racionamiento y movilidad del mes los carga el jefe. El servidor aplica estas
+reglas: a cada usuario solo le envía los datos que puede ver.
+
 ## Pantallas
 
 - **Vista general** — calendario mensual del área elegida con el nombre
@@ -77,6 +85,15 @@ derecha.
   turnos de ambos, o el jefe, lo aprueba. Al aprobarse, el intercambio se
   aplica solo en la planilla (si la planilla cambió entretanto, no se
   aplica). Avisa cuando faltan menos de 72 h, como pide el reglamento.
+- **Presencialidad** — tres vistas:
+  - *Presencialidad*: grilla persona × día con EZE (Ezeiza), BOU (Bouchard),
+    C (Comisión), F (Falta), V (Vacaciones) y L (Licencia). Solo EZE y BOU
+    suman días y monto (racionamiento + movilidad por día). Se marca
+    eligiendo una opción y tocando o arrastrando sobre los días.
+  - *Remoto*: días de trabajo remoto.
+  - *Resumen anual*: días remotos de cada persona, mes a mes.
+
+  Los feriados no se pueden marcar. El jefe puede filtrar por área.
 - **Personal** — listado por área con rango y usuario; alta de personas y
   de sus usuarios (email y contraseña inicial).
 - **Administración** (solo jefe) — respaldo, áreas (y su sección en la
@@ -122,6 +139,8 @@ Documentos principales:
 | `turnos` | `anio_mes_personaId` | `anio`, `mes`, `personaId`, `areaId`, `dias` (`{"5":"TM"}`) |
 | `feriados` | `anio-mes-dia` | `anio`, `mes`, `dia`, `nombre` (leyenda que sale en el PDF) |
 | `solicitudes` | id | `deId`, `paraId`, `dias` (`[{anio, mes, dia, de, para}]`), `motivo`, `estado` (`pendiente`/`aceptada`/`rechazada`/`cancelada`/`aprobada`/`denegada`), `creada`, `respondida`, `resuelta`, `resueltaPorId`, `nota` |
+| `presencia` | `anio_mes_personaId` | `anio`, `mes`, `personaId`, `dias` (`{"5":"EZE"}`), `remoto` (`[3, 4]`) |
+| `valores` | `anio_mes` | `anio`, `mes`, `racionamiento`, `movilidad` (por día) |
 | `config` | `planilla` | `titulo`, `subtitulo`, `diasExtra`, `firma1`, `firma2`, `logo`, `textoAntes`, `textoDespues` |
 
 ### Cómputo de horas
@@ -133,5 +152,5 @@ del mes siguiente son informativas.
 
 ## Pendiente
 
-- Módulo de presencialidad y costos mensuales (Racionamiento y Movilidad)
-  heredado del proyecto anterior.
+- Presencialidad: notas por día y vista calendario (estaban en el proyecto
+  anterior), y exportación del resumen mensual.

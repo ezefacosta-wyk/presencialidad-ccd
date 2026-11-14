@@ -32,6 +32,8 @@ from urllib.parse import parse_qs, urlparse
 RAIZ_WEB = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 RANGO = {'jefe': 4, 'coordinador': 3, 'adjunto': 2, 'tecnico': 1}
 GRUPOS = {'activo', 'pasivo', 'ausente'}
+# Presencialidad: solo EZE y BOU cuentan días y monto (racionamiento + movilidad)
+CODIGOS_PRESENCIA = {'EZE', 'BOU', 'C', 'F', 'V', 'L'}
 COOKIE = 'ccd_sesion'
 DURACION_SESION = 30 * 24 * 3600
 MAX_CUERPO = 3 * 1024 * 1024
@@ -167,6 +169,16 @@ def carga_turnos(yo, p):
     return es_jefe(yo) or (coordina(yo, p.get('areaId')) and RANGO.get(p.get('rol'), 9) <= RANGO[yo['rol']])
 
 
+# Presencialidad: el jefe ve todo; el resto, solo el personal de su área.
+def ve_presencia(yo, p):
+    return es_jefe(yo) or (bool(yo.get('areaId')) and p.get('areaId') == yo.get('areaId'))
+
+
+# Cada uno marca lo suyo; coordinadores y adjuntos, además, su área (su rango o menor).
+def marca_presencia(yo, p, persona_id):
+    return persona_id == yo['id'] or carga_turnos(yo, p)
+
+
 # ---------------------------------------------------------------------------
 # Lógica de la API
 # ---------------------------------------------------------------------------
@@ -255,9 +267,17 @@ class Api:
                     turnos[t['personaId']] = t.get('dias', {})
                 elif (t.get('anio'), t.get('mes')) == sig:
                     turnos_sig[t['personaId']] = t.get('dias', {})
+            personas = {p['id']: p for p in self.db.listar('personas')}
+            presencia = {}
+            for r in self.db.listar('presencia'):
+                p = personas.get(r.get('personaId'))
+                if r.get('anio') == anio and r.get('mes') == mes and p and ve_presencia(yo, p):
+                    presencia[r['personaId']] = {'dias': r.get('dias') or {}, 'remoto': r.get('remoto') or []}
             return {
                 'version': self.db.version,
                 'yo': yo,
+                'presencia': presencia,
+                'valores': self.db.get('valores', f'{anio}_{mes:02d}') or {'racionamiento': 0, 'movilidad': 0},
                 'areas': self.db.listar('areas'),
                 'personas': self.db.listar('personas'),
                 'tipos': self.db.listar('tipos'),
@@ -324,9 +344,10 @@ class Api:
                 if not gestiona_persona(yo, p) or id_ == yo['id']:
                     raise ErrorApi('No tenés permiso para quitar a esta persona.', 403)
                 db.quitar('personas', id_)
-                for t in db.listar('turnos'):
-                    if t.get('personaId') == id_:
-                        db.quitar('turnos', t['id'])
+                for col_p in ('turnos', 'presencia'):
+                    for t in db.listar(col_p):
+                        if t.get('personaId') == id_:
+                            db.quitar(col_p, t['id'])
                 fila = db.con.execute('SELECT email FROM usuarios WHERE persona_id=?', (id_,)).fetchone()
                 if fila:
                     db.con.execute('DELETE FROM sesiones WHERE email=?', (fila[0],))
@@ -366,6 +387,63 @@ class Api:
                 t['dias'].pop(str(dia), None)
             db.poner('turnos', tid, t, merge=False)
         return {}
+
+    # --- presencialidad
+    def presencia(self, yo, c):
+        try:
+            anio, mes, dia = int(c['anio']), int(c['mes']), int(c['dia'])
+        except (KeyError, TypeError, ValueError):
+            raise ErrorApi('Fecha inválida.')
+        pid, tipo, valor = str(c.get('personaId', '')), c.get('tipo'), c.get('valor')
+        with self.db.transaccion() as db:
+            p = db.get('personas', pid)
+            if not p:
+                raise ErrorApi('La persona no existe.')
+            if not marca_presencia(yo, p, pid) or not ve_presencia(yo, p):
+                raise ErrorApi('No podés marcar la presencialidad de esta persona.', 403)
+            if db.get('feriados', f'{anio}-{mes}-{dia}'):
+                raise ErrorApi('Ese día es feriado.')
+            rid = turno_id(anio, mes, pid)
+            r = db.get('presencia', rid) or {'anio': anio, 'mes': mes, 'personaId': pid, 'dias': {}, 'remoto': []}
+            if tipo == 'presencial':
+                if valor and valor not in CODIGOS_PRESENCIA:
+                    raise ErrorApi('Código de presencialidad inválido.')
+                if valor:
+                    r['dias'][str(dia)] = valor
+                else:
+                    r['dias'].pop(str(dia), None)
+            elif tipo == 'remoto':
+                dias = set(r.get('remoto') or [])
+                (dias.add if valor else dias.discard)(dia)
+                r['remoto'] = sorted(dias)
+            else:
+                raise ErrorApi('Tipo inválido.')
+            db.poner('presencia', rid, r, merge=False)
+        return {}
+
+    def valores(self, yo, c):
+        if not es_jefe(yo):
+            raise ErrorApi('Solo el jefe de departamento carga los valores del mes.', 403)
+        try:
+            anio, mes = int(c['anio']), int(c['mes'])
+            rac, mov = float(c.get('racionamiento') or 0), float(c.get('movilidad') or 0)
+        except (KeyError, TypeError, ValueError):
+            raise ErrorApi('Valores inválidos.')
+        if rac < 0 or mov < 0:
+            raise ErrorApi('Los valores no pueden ser negativos.')
+        with self.db.transaccion() as db:
+            db.poner('valores', f'{anio}_{mes:02d}', {'anio': anio, 'mes': mes, 'racionamiento': rac, 'movilidad': mov}, merge=False)
+        return {}
+
+    def anual(self, yo, anio):
+        with self.db.lock:
+            personas = {p['id']: p for p in self.db.listar('personas')}
+            out = {}
+            for r in self.db.listar('presencia'):
+                p = personas.get(r.get('personaId'))
+                if r.get('anio') == anio and p and ve_presencia(yo, p):
+                    out.setdefault(r['personaId'], {})[str(r['mes'])] = len(r.get('remoto') or [])
+            return out
 
     def usuario(self, yo, c):
         pid = str(c.get('personaId', ''))
@@ -584,6 +662,12 @@ class Manejador(BaseHTTPRequestHandler):
         if ruta == 'cambios':
             desde = int((q.get('desde') or ['0'])[0])
             return self.enviar(200, {'version': api.db.esperar_cambio(desde)})
+        if ruta == 'presencia/anual':
+            try:
+                anio = int(q['anio'][0])
+            except (KeyError, ValueError):
+                raise ErrorApi('Año inválido.')
+            return self.enviar(200, {'remoto': api.anual(yo, anio)})
         if ruta == 'respaldo':
             if not es_jefe(yo):
                 raise ErrorApi('Solo el jefe de departamento puede descargar el respaldo.', 403)
@@ -629,6 +713,7 @@ class Manejador(BaseHTTPRequestHandler):
             'usuario': api.usuario, 'clave': api.clave,
             'solicitudes/nueva': api.nueva_solicitud, 'solicitudes/estado': api.estado_solicitud,
             'solicitudes/aprobar': api.aprobar,
+            'presencia': api.presencia, 'presencia/valores': api.valores,
         }
         if ruta not in acciones:
             raise ErrorApi('No encontrado.', 404)

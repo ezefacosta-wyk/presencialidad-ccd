@@ -1,4 +1,5 @@
 import { NOMBRE_SISTEMA } from './config.js';
+import { TIPOS_PRESENCIA, COLOR_REMOTO } from './defaults.js';
 import { SECCION_TECNICOS } from './defaults.js';
 import * as store from './store.js';
 import * as P from './planilla.js';
@@ -47,7 +48,12 @@ const ui = {
   dia: hoy.getDate(),
   area: null,       // área del calendario de la vista general
   areaPlan: null,   // filtro de la planilla (null = todo el departamento)
-  pincel: null      // tipo de turno activo al planificar ('' = borrar)
+  pincel: null,     // tipo de turno activo al planificar ('' = borrar)
+  presVista: 'presencial', // 'presencial' | 'remoto' | 'anual'
+  areaPres: '',     // filtro del jefe en presencialidad ('' = todo, '__jef' = jefatura)
+  pincelPres: 'EZE',
+  pincelRem: 'R',
+  anual: null       // { anio, datos } del resumen anual
 };
 
 // ---------------------------------------------------------------
@@ -62,6 +68,8 @@ const rolesAsignables = () => Object.keys(ROLES).filter(r => esJefe() || ROLES[r
 // Turnos: en su área, de personas de su mismo rango o menor (un adjunto no
 // cambia los turnos de su coordinador).
 const puedeEditarTurnos = (p) => esJefe() || (coordinaArea(p.areaId) && ROLES[p.rol].rango <= ROLES[yo().rol].rango);
+// Presencialidad: cada uno marca lo suyo; coordinadores y adjuntos, además, su área.
+const puedeMarcar = (p) => p.id === yo()?.id || puedeEditarTurnos(p);
 const puedeEditarPersona = (p) => esJefe() || (coordinaArea(p.areaId) && ROLES[p.rol].rango < ROLES[yo().rol].rango);
 
 // ---------------------------------------------------------------
@@ -259,6 +267,142 @@ function vistaTurnos() {
     </table></div>
     <p class="ayuda">Las ${cols.filter(c => c.ext).length} columnas finales son los primeros días de ${MESES[sig.mes - 1].toLowerCase()} y no suman horas en este mes. Las horas reales que superan ${P.TOPE_HORAS} se marcan en rojo.</p>`
       : '<p class="vacio">Todavía no hay personal cargado.</p>'}
+  </section>`;
+}
+
+// ---------------------------------------------------------------
+// PRESENCIALIDAD (cada uno ve solo su área; el jefe ve todo)
+// ---------------------------------------------------------------
+const tipoPres = (code) => TIPOS_PRESENCIA.find(t => t.id === code);
+const plata = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 });
+const diasQueCuentan = (r) => Object.values((r && r.dias) || {}).filter(c => tipoPres(c)?.cuenta).length;
+const porDia = () => (Number(data.valores.racionamiento) || 0) + (Number(data.valores.movilidad) || 0);
+
+function gruposPresencia() {
+  const visibles = data.personas.filter(store.vePresencia);
+  const porNombre = (a, b) => a.nombre.localeCompare(b.nombre, 'es');
+  const grupos = [];
+  const agregar = (titulo, areaId) => {
+    const gente = visibles.filter(p => (p.areaId || null) === areaId).sort(porNombre);
+    if (gente.length) grupos.push({ titulo, gente });
+  };
+  if (!esJefe()) {
+    const a = data.areas.find(x => x.id === yo().areaId);
+    agregar(a ? a.nombre : 'Tu área', yo().areaId || null);
+  } else if (ui.areaPres === '__jef') agregar('Jefatura', null);
+  else if (ui.areaPres) { const a = data.areas.find(x => x.id === ui.areaPres); if (a) agregar(a.nombre, a.id); }
+  else { areasOrdenadas().forEach(a => agregar(a.nombre, a.id)); agregar('Jefatura', null); }
+  return grupos;
+}
+
+function grillaPresencia(tipo, grupos) {
+  const n = diasEnMes(ui.anio, ui.mes);
+  const cols = [];
+  for (let d = 1; d <= n; d++) {
+    const dow = new Date(ui.anio, ui.mes - 1, d).getDay();
+    cols.push({ d, dow, finde: dow === 0 || dow === 6, fer: feriado(d) });
+  }
+  const cls = (c) => [c.finde ? 'finde' : '', c.fer ? 'feriado' : ''].filter(Boolean).join(' ');
+  const tit = (c) => c.fer ? ` title="${esc(c.fer.nombre || 'Feriado')}"` : '';
+  const pres = tipo === 'presencial';
+  const anchoTotal = cols.length + (pres ? 3 : 2);
+  const filas = grupos.map(g => `${grupos.length > 1 ? `<tr class="grupo-fila"><th colspan="${anchoTotal}">${esc(g.titulo)}</th></tr>` : ''}${g.gente.map(p => {
+    const r = data.presencia[p.id] || { dias: {}, remoto: [] };
+    const editable = puedeMarcar(p);
+    const celdas = cols.map(c => {
+      if (c.fer) return `<td class="${cls(c)}"${tit(c)}><span class="pp bloqueada" aria-label="Feriado"></span></td>`;
+      let code = '', estilo = '', etiqueta = '';
+      if (pres) { code = r.dias[c.d] || ''; const t = tipoPres(code); if (t) { estilo = colorVars(t.color); etiqueta = t.label; } }
+      else if (r.remoto.includes(c.d)) { code = 'R'; estilo = colorVars(COLOR_REMOTO); etiqueta = 'Remoto'; }
+      return `<td class="${cls(c)}"><button class="pp${code ? ' llena' : ''}" ${estilo ? `style="${estilo}"` : ''} data-k="${pres ? 'pres' : 'rem'}" data-p="${esc(p.id)}" data-d="${c.d}" data-c="${code}" ${editable ? '' : 'disabled'} aria-label="${esc(p.nombre)}, ${c.d}/${ui.mes}${etiqueta ? ', ' + etiqueta : ''}">${code}</button></td>`;
+    }).join('');
+    const dias = pres ? diasQueCuentan(r) : r.remoto.length;
+    return `<tr class="${p.id === yo()?.id ? 'fila-mia' : ''}"><th class="p-nom">${esc(p.nombre)} ${rolBadge(p.rol)}</th>${celdas}
+      <td class="p-h p-real">${dias}</td>${pres ? `<td class="p-h p-plata">${plata.format(dias * porDia())}</td>` : ''}</tr>`;
+  }).join('')}`).join('');
+  return `<div class="tabla-wrap"><table class="planilla grilla-pres">
+    <thead>
+      <tr><th class="p-nom" rowspan="2">Persona</th>${cols.map(c => `<th class="${cls(c)}"${tit(c)}>${P.DIAS3[c.dow]}</th>`).join('')}
+        <th class="p-h" rowspan="2">Días</th>${pres ? '<th class="p-h" rowspan="2">Total</th>' : ''}</tr>
+      <tr>${cols.map(c => `<th class="${cls(c)}"${tit(c)}>${c.d}</th>`).join('')}</tr>
+    </thead>
+    <tbody>${filas}</tbody>
+  </table></div>`;
+}
+
+function resumenAnual(grupos) {
+  if (!ui.anual || ui.anual.anio !== ui.anio) {
+    if (!ui.anualCargando) {
+      ui.anualCargando = true;
+      const anio = ui.anio;
+      store.resumenAnual(anio).then(datos => { ui.anual = { anio, datos }; ui.anualCargando = false; render(); });
+    }
+    return '<p class="vacio">Cargando el resumen…</p>';
+  }
+  const datos = ui.anual.datos;
+  const filas = grupos.map(g => `${grupos.length > 1 ? `<tr class="grupo-fila"><th colspan="14">${esc(g.titulo)}</th></tr>` : ''}${g.gente.map(p => {
+    const m = datos[p.id] || {};
+    let total = 0;
+    const celdas = MESES.map((_, i) => { const v = Number(m[i + 1]) || 0; total += v; return `<td class="p-h${v ? '' : ' cero'}">${v}</td>`; }).join('');
+    return `<tr><th class="p-nom">${esc(p.nombre)}</th>${celdas}<td class="p-h p-real">${total}</td></tr>`;
+  }).join('')}`).join('');
+  return `<div class="tabla-wrap"><table class="planilla grilla-pres anual">
+    <thead><tr><th class="p-nom">Persona</th>${MESES.map(m => `<th>${m.slice(0, 3)}</th>`).join('')}<th class="p-h">Total ${ui.anual.anio}</th></tr></thead>
+    <tbody>${filas}</tbody>
+  </table></div>
+  <p class="ayuda">Días de trabajo remoto por mes. La presencialidad no se incluye en el resumen anual.</p>`;
+}
+
+function vistaPresencia() {
+  const grupos = gruposPresencia();
+  const vista = ui.presVista;
+  const area = data.areas.find(a => a.id === yo().areaId);
+  const editables = grupos.some(g => g.gente.some(puedeMarcar));
+  const alcance = esJefe()
+    ? `<div class="chips" role="tablist" aria-label="Área">
+        ${[['', 'Todo el departamento'], ...areasOrdenadas().map(a => [a.id, a.nombre]), ['__jef', 'Jefatura']].map(([id, nombre]) =>
+          `<button class="chip-area${ui.areaPres === id ? ' activa' : ''}" data-accion="area-pres" data-id="${esc(id)}">${esc(nombre)}</button>`).join('')}
+      </div>`
+    : `<p class="alcance">Ves solo el personal de <b>${esc(area ? area.nombre : 'tu área')}</b>.${yo().rol === 'tecnico' ? ' Podés marcar tu propia fila.' : ' Podés marcar tu fila y las de tu área.'}</p>`;
+
+  const subtabs = `<div class="segmentado" role="tablist">
+    ${[['presencial', 'Presencialidad'], ['remoto', 'Remoto'], ['anual', 'Resumen anual']].map(([id, txt]) =>
+      `<button class="${vista === id ? 'activo' : ''}" data-accion="pres-vista" data-id="${id}" role="tab" aria-selected="${vista === id}">${txt}</button>`).join('')}
+  </div>`;
+
+  const valores = `<div class="valores">
+      <div><span>Racionamiento</span><b>${plata.format(Number(data.valores.racionamiento) || 0)}</b></div>
+      <div><span>Movilidad</span><b>${plata.format(Number(data.valores.movilidad) || 0)}</b></div>
+      <div><span>Por día presencial</span><b>${plata.format(porDia())}</b></div>
+      ${esJefe() ? `<form class="valores-form" data-form="valores">
+        <label>Racionamiento<input name="racionamiento" type="number" min="0" step="0.01" value="${esc(data.valores.racionamiento || 0)}"></label>
+        <label>Movilidad<input name="movilidad" type="number" min="0" step="0.01" value="${esc(data.valores.movilidad || 0)}"></label>
+        <button class="btn chico">Guardar valores de ${MESES[ui.mes - 1].toLowerCase()}</button>
+      </form>` : ''}
+    </div>`;
+
+  const pinceles = vista === 'presencial'
+    ? `<div class="pinceles"><span class="pinceles-label">Marcar:</span>
+        ${TIPOS_PRESENCIA.map(t => `<button class="pincel${ui.pincelPres === t.id ? ' activo' : ''}" style="${colorVars(t.color)}" data-accion="pincel-pres" data-id="${t.id}"><b>${t.id}</b></button>`).join('')}
+        <button class="pincel borrar${ui.pincelPres === '' ? ' activo' : ''}" data-accion="pincel-pres" data-id="">Borrar</button>
+        <span class="pincel-desc">${ui.pincelPres ? `${tipoPres(ui.pincelPres).label}${tipoPres(ui.pincelPres).cuenta ? ' · suma días y monto' : ' · se registra pero no suma'}` : 'Vacía las celdas'}</span></div>`
+    : `<div class="pinceles"><span class="pinceles-label">Marcar:</span>
+        <button class="pincel${ui.pincelRem === 'R' ? ' activo' : ''}" style="${colorVars(COLOR_REMOTO)}" data-accion="pincel-rem" data-id="R"><b>R</b> Remoto</button>
+        <button class="pincel borrar${ui.pincelRem === '' ? ' activo' : ''}" data-accion="pincel-rem" data-id="">Quitar</button></div>`;
+
+  const vacio = '<p class="vacio">No hay personal para mostrar.</p>';
+  let cuerpo;
+  if (vista === 'anual') cuerpo = grupos.length ? resumenAnual(grupos) : vacio;
+  else cuerpo = `${vista === 'presencial' ? valores : ''}
+    ${editables ? pinceles : ''}
+    ${editables ? '<p class="ayuda">Elegí una opción y tocá los días, o mantené apretado el mouse y arrastrá para marcar varios seguidos. Tocar un día que ya tiene esa marca la quita. Los feriados no se pueden marcar.</p>' : ''}
+    ${grupos.length ? grillaPresencia(vista, grupos) : vacio}
+    ${vista === 'presencial' ? `<p class="ayuda">Solo <b>EZE</b> y <b>BOU</b> suman días y monto (racionamiento + movilidad por día). Comisión, Falta, Vacaciones y Licencia quedan registradas sin sumar.</p>` : ''}`;
+
+  return `<section class="bloque">
+    <div class="bloque-head"><h2>${vista === 'anual' ? `Resumen anual ${ui.anio}` : `Presencialidad · ${MESES[ui.mes - 1]} ${ui.anio}`}</h2>${subtabs}</div>
+    <div class="bloque-sub">${alcance}</div>
+    ${cuerpo}
   </section>`;
 }
 
@@ -748,7 +892,7 @@ function aviso(texto, error) {
 // ---------------------------------------------------------------
 // Render general
 // ---------------------------------------------------------------
-const VISTAS = { general: vistaGeneral, turnos: vistaTurnos, cambios: vistaCambios, personal: vistaPersonal, admin: vistaAdmin };
+const VISTAS = { general: vistaGeneral, turnos: vistaTurnos, cambios: vistaCambios, presencia: vistaPresencia, personal: vistaPersonal, admin: vistaAdmin };
 
 function renderSesion() {
   const caja = $('#sesion');
@@ -828,7 +972,8 @@ function render() {
   badge.textContent = n; badge.hidden = !n;
 
   // No repintar Administración mientras se escribe en un campo (perdería lo tipeado)
-  if (ui.tab === 'admin' && app.contains(document.activeElement) && document.activeElement.matches('input, textarea')) return;
+  const foco = document.activeElement;
+  if (app.contains(foco) && foco.matches('input, textarea') && (ui.tab === 'admin' || foco.closest('[data-form="valores"]'))) return;
 
   // Conserva el scroll horizontal de la grilla al repintar
   const wrap = app.querySelector('.tabla-wrap');
@@ -843,18 +988,29 @@ function render() {
 // ---------------------------------------------------------------
 let arrastre = null;
 let ultimoFueMouse = false;
+// Celdas pintables: .pc (planilla de turnos) y .pp (presencialidad / remoto, data-k)
+const CELDA = '.pc, .pp:not(.bloqueada)';
 function pintar(el, code) {
   const p = data.personas.find(x => x.id === el.dataset.p);
-  if (!p || !puedeEditarTurnos(p)) return;
+  if (!p) return;
   if ((el.dataset.c || null) === (code || null)) return;
+  const k = el.dataset.k;
+  if (k === 'pres' || k === 'rem') {
+    if (!puedeMarcar(p)) return;
+    store.setPresencia(p, Number(el.dataset.d), k === 'pres' ? 'presencial' : 'remoto', k === 'pres' ? code : !!code)
+      .then(err => { if (err) aviso(err, true); });
+    return;
+  }
+  if (!puedeEditarTurnos(p)) return;
   store.setTurno(p, Number(el.dataset.a), Number(el.dataset.m), Number(el.dataset.d), code);
 }
-const destino = (el) => (ui.pincel && ui.pincel !== (el.dataset.c || '') ? ui.pincel : null);
-const claveCelda = (el) => `${el.dataset.p}|${el.dataset.a}|${el.dataset.m}|${el.dataset.d}`;
+const pincelDe = (el) => el.dataset.k === 'pres' ? ui.pincelPres : el.dataset.k === 'rem' ? ui.pincelRem : ui.pincel;
+const destino = (el) => { const b = pincelDe(el); return b && b !== (el.dataset.c || '') ? b : null; };
+const claveCelda = (el) => `${el.dataset.k || 't'}|${el.dataset.p}|${el.dataset.a}|${el.dataset.m}|${el.dataset.d}`;
 
 document.addEventListener('pointerdown', (e) => {
   ultimoFueMouse = e.pointerType === 'mouse';
-  const el = e.target.closest('.pc');
+  const el = e.target.closest(CELDA);
   if (!el || el.disabled || !ultimoFueMouse || e.button !== 0) return;
   e.preventDefault();
   arrastre = { code: destino(el), ult: claveCelda(el) };
@@ -862,7 +1018,7 @@ document.addEventListener('pointerdown', (e) => {
 });
 document.addEventListener('pointermove', (e) => {
   if (!arrastre) return;
-  const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.pc');
+  const el = document.elementFromPoint(e.clientX, e.clientY)?.closest(CELDA);
   if (!el || el.disabled) return;
   const k = claveCelda(el);
   if (k === arrastre.ult) return;
@@ -909,7 +1065,7 @@ window.addEventListener('resize', cerrarMenu);
 document.addEventListener('click', async (e) => {
   if (!menu.hidden && !menu.contains(e.target) && !e.target.closest('[data-accion="persona-menu"]')) cerrarMenu();
   // Celdas de la planilla con teclado o pantalla táctil (el mouse pinta en pointerdown)
-  const pc = e.target.closest('.pc');
+  const pc = e.target.closest(CELDA);
   if (pc) {
     const porMouse = e.pointerType ? e.pointerType === 'mouse' : (ultimoFueMouse && e.detail > 0);
     if (!pc.disabled && !porMouse) pintar(pc, destino(pc));
@@ -950,6 +1106,10 @@ document.addEventListener('click', async (e) => {
     }
 
     case 'pincel': ui.pincel = d.id; render(); break;
+    case 'pincel-pres': ui.pincelPres = d.id; render(); break;
+    case 'pincel-rem': ui.pincelRem = d.id; render(); break;
+    case 'area-pres': ui.areaPres = d.id; render(); break;
+    case 'pres-vista': ui.presVista = d.id; if (d.id === 'anual') ui.anual = null; render(); break;
     case 'persona-nueva': modalPersona(null, d.area || null); break;
     case 'persona-editar': modalPersona(data.personas.find(x => x.id === d.id)); break;
     case 'area-editar': if (esJefe()) modalArea(data.areas.find(x => x.id === d.id)); break;
@@ -998,6 +1158,13 @@ document.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (document.activeElement) document.activeElement.blur();
   const f = e.target.elements;
+  if (tipoForm === 'valores') {
+    const rac = Number(f.racionamiento.value) || 0, mov = Number(f.movilidad.value) || 0;
+    if (rac < 0 || mov < 0) { aviso('Los valores no pueden ser negativos.', true); return; }
+    const err = await store.guardarValores(rac, mov);
+    aviso(err || 'Valores del mes guardados.', !!err);
+    return;
+  }
   if (tipoForm === 'feriado') {
     const [a, m, dd] = f.fecha.value.split('-').map(Number);
     store.guardar('feriados', `${a}-${m}-${dd}`, { anio: a, mes: m, dia: dd, nombre: f.nombre.value.trim() });

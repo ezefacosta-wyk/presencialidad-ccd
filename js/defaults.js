@@ -54,3 +54,15 @@ export const CONFIG_DEFAULT = {
 // etiqueta de su área (si tiene) o "TÉCNICOS DE ÁREA".
 export const SECCION_TECNICOS = 'TÉCNICOS DE ÁREA.';
 export const SECCION_ROL = { adjunto: 'COOR. ADJ. DE ÁREA.', coordinador: 'COOR. DE ÁREA.', jefe: 'JEFE' };
+
+// Presencialidad (del Registro de Presencialidad original). Solo los que
+// tienen cuenta: true suman días y monto (racionamiento + movilidad).
+export const TIPOS_PRESENCIA = [
+  { id: 'EZE', label: 'Ezeiza', cuenta: true, color: '#1F6F63' },
+  { id: 'BOU', label: 'Bouchard', cuenta: true, color: '#2E5C8A' },
+  { id: 'C', label: 'Comisión', cuenta: false, color: '#D9A441' },
+  { id: 'F', label: 'Falta', cuenta: false, color: '#B3462C' },
+  { id: 'V', label: 'Vacaciones', cuenta: false, color: '#9DB66A' },
+  { id: 'L', label: 'Licencia', cuenta: false, color: '#7A5C99' }
+];
+export const COLOR_REMOTO = '#4F6FA8';
